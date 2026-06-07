@@ -18,8 +18,12 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
-html, body {
-  overscroll-behavior-y: none;
+html, body, #root {
+  overscroll-behavior: none;
+  overflow: hidden;
+  width: 100%;
+  height: 100%;
+  position: fixed;
 }
 
 /* Custom Scrollbar for Spotify look */
@@ -46,4 +50,47 @@ html, body {
 .custom-scrollbar {
   scrollbar-width: auto;
   scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
+}
+
+/* Custom Spotify Range Slider */
+.spotify-range {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.spotify-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  opacity: 0;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  transition: opacity 0.1s;
+}
+
+.spotify-range:hover::-webkit-slider-thumb {
+  opacity: 1;
+}
+
+.spotify-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: none;
+  border-radius: 50%;
+  background: #fff;
+  cursor: pointer;
+  opacity: 0;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+  transition: opacity 0.1s;
+}
+
+.spotify-range:hover::-moz-range-thumb {
+  opacity: 1;
 }
