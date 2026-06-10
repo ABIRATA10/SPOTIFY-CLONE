@@ -61,6 +61,7 @@ export default function SpotifyDashboard() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [queue, setQueue] = useState<Track[]>([]); // Currently playing context
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
+  const [followedArtists, setFollowedArtists] = useState<string[]>([]);
   
   // Player State
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -73,6 +74,7 @@ export default function SpotifyDashboard() {
   const [isProfileMenuOpen, setIsProfileMenuOpen] = useState(false);
   const [isShuffled, setIsShuffled] = useState(false);
   const [repeatMode, setRepeatMode] = useState<'off' | 'all' | 'one'>('off');
+  const [isMobilePlayerOpen, setIsMobilePlayerOpen] = useState(false);
   const [originalQueue, setOriginalQueue] = useState<Track[]>([]);
   const [activeTab, setActiveTab] = useState<'home' | 'search' | 'artist' | 'liked' | 'queue'>('home');
   const [searchQuery, setSearchQuery] = useState('');
@@ -596,32 +598,39 @@ export default function SpotifyDashboard() {
   };
 
   const addToPlaylist = (track: Track) => {
-    let targetPlaylist = playlists.find(p => p.id !== 'uploads');
-    
-    if (!targetPlaylist) {
-        targetPlaylist = {
-            id: Math.random().toString(36).substr(2, 9),
-            name: 'My Playlist #1',
-            images: [],
-            owner: { display_name: 'You' },
-            tracks: { total: 0, items: [] }
-        };
-        setPlaylists([targetPlaylist, ...playlists]);
-    }
-    
-    setPlaylists(prev => prev.map(p => {
-        if (p.id === targetPlaylist?.id) {
-            return {
-                ...p,
-                tracks: {
-                    ...p.tracks,
-                    items: [...(p.tracks.items || []), { track }]
-                }
+    setPlaylists(prev => {
+        let targetPlaylistInfo = prev.find(p => p.id !== 'uploads');
+        let nextPlaylists = [...prev];
+        let targetName = 'My Playlist #1';
+        if (!targetPlaylistInfo) {
+            const newPlaylist = {
+                id: Math.random().toString(36).substr(2, 9),
+                name: 'My Playlist #1',
+                images: [],
+                owner: { display_name: 'You' },
+                tracks: { total: 0, items: [] }
             };
+            nextPlaylists = [newPlaylist, ...nextPlaylists];
+            targetPlaylistInfo = newPlaylist;
+        } else {
+            targetName = targetPlaylistInfo.name;
         }
-        return p;
-    }));
-    alert('Added to ' + targetPlaylist.name);
+        
+        requestAnimationFrame(() => alert(`Added to ${targetName}`));
+
+        return nextPlaylists.map(p => {
+             if (p.id === targetPlaylistInfo?.id) {
+                 return {
+                     ...p,
+                     tracks: {
+                         ...p.tracks,
+                         items: [...(p.tracks.items || []), { track }]
+                     }
+                 };
+             }
+             return p;
+        });
+    });
   };
 
   const addToQueue = (track: Track) => {
@@ -975,7 +984,7 @@ export default function SpotifyDashboard() {
   const displayItems = playlists.length > 0 ? playlists : tracks;
 
   return (
-    <div className="flex flex-col h-screen bg-black text-white font-sans overflow-hidden select-none relative pb-[90px]">
+    <div className="flex flex-col h-screen bg-black text-white font-sans overflow-hidden select-none relative pb-[140px] md:pb-[90px]">
       {/* Main App Area */}
       <div className={`grid grid-cols-1 md:grid-cols-[300px_minmax(0,1fr)] ${isRightSidebarOpen && currentTrack ? 'xl:grid-cols-[300px_minmax(0,1fr)_auto]' : ''} overflow-hidden p-2 gap-2 h-full w-full`}>
         
@@ -1176,7 +1185,19 @@ export default function SpotifyDashboard() {
           <div className="p-6 pt-0 pb-20 bg-gradient-to-b from-[#2a2a2a] to-[#121212] flex-1">
              {activeTab === 'home' && (
                 <>
-                  <h2 className="text-3xl font-bold text-white mb-6 mt-6 tracking-tight">Good afternoon</h2>
+                  <div className="flex justify-between items-center mb-4 mt-6">
+                     <h2 className="text-2xl font-bold text-white tracking-tight">Good evening</h2>
+                     <button className="text-white hover:scale-105 transition-transform">
+                        <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"></path><path d="M13.73 21a2 2 0 0 1-3.46 0"></path></svg>
+                     </button>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 mb-6 overflow-x-auto no-scrollbar pb-2">
+                     <button className="bg-[#1ed760] text-black px-4 py-1.5 rounded-full text-sm font-semibold shrink-0">All</button>
+                     <button className="bg-[#2a2a2a] text-white px-4 py-1.5 rounded-full text-sm font-semibold shrink-0 hover:bg-[#333]">Music</button>
+                     <button className="bg-[#2a2a2a] text-white px-4 py-1.5 rounded-full text-sm font-semibold shrink-0 hover:bg-[#333]">Podcasts</button>
+                     <button className="bg-[#2a2a2a] text-white px-4 py-1.5 rounded-full text-sm font-semibold shrink-0 hover:bg-[#333]">Audiobooks</button>
+                  </div>
                   
                   {/* Compact Cards Grid (2-column wide) */}
                   <div className="grid grid-cols-2 xl:grid-cols-3 gap-4 mb-8">
@@ -1692,6 +1713,28 @@ export default function SpotifyDashboard() {
                      </div>
                   </div>
                   
+                  <div className="flex items-center gap-4 mb-8">
+                     <button 
+                       className="w-14 h-14 bg-[#1ed760] rounded-full flex items-center justify-center hover:scale-105 hover:bg-[#3be477] transition-all cursor-pointer shadow-[0_8px_8px_rgba(0,0,0,0.3)]"
+                       onClick={() => {
+                          if (artistTopTracks.length > 0) {
+                              setQueue(artistTopTracks);
+                              setOriginalQueue(artistTopTracks);
+                              setCurrentTrackIndex(0);
+                              setIsPlaying(true);
+                          }
+                       }}
+                     >
+                        <Play className="w-7 h-7 fill-black text-black" />
+                     </button>
+                     <button 
+                        onClick={() => setFollowedArtists(prev => prev.includes(viewingArtist) ? prev.filter(a => a !== viewingArtist) : [...prev, viewingArtist])}
+                        className="px-6 py-2 border border-[#878787] rounded-full text-white text-[14px] font-bold hover:scale-105 hover:border-white transition-all"
+                     >
+                        {followedArtists.includes(viewingArtist) ? 'Following' : 'Follow'}
+                     </button>
+                  </div>
+                  
                   <h2 className="text-2xl font-bold text-white mb-6">Popular</h2>
                   
                   {isFetchingArtist ? (
@@ -1829,10 +1872,96 @@ export default function SpotifyDashboard() {
                   </div>
 
                   <div className="mt-12">
-                     <h2 className="text-2xl font-bold text-white mb-6">Top followers</h2>
-                     <div className="text-[#b3b3b3] p-4 text-center border border-[#282828] rounded-md">
-                        <p>Followers will appear here.</p>
+                     <h2 className="text-2xl font-bold text-white mb-6">Following</h2>
+                     {followedArtists.length === 0 ? (
+                       <div className="text-[#b3b3b3] p-4 text-center border border-[#282828] rounded-md">
+                          <p>You aren't following any artists yet.</p>
+                       </div>
+                     ) : (
+                       <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-6">
+                         {followedArtists.map(artist => (
+                           <div 
+                             key={artist}
+                             onClick={() => navigateTo('artist', artist)}
+                             className="bg-[#181818] p-4 rounded-md cursor-pointer hover:bg-[#282828] transition-all duration-300 group flex flex-col shadow-lg"
+                           >
+                             <div className="relative aspect-square w-full mb-4 shadow-[0_8px_24px_rgba(0,0,0,0.5)] overflow-hidden rounded-full flex-shrink-0">
+                                <img src="https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=300&auto=format&fit=crop" className="object-cover w-full h-full" alt="Artist" />
+                             </div>
+                             <h3 className="font-bold text-white truncate pb-1">{artist}</h3>
+                             <p className="text-sm text-[#b3b3b3] truncate">Artist</p>
+                           </div>
+                         ))}
+                       </div>
+                     )}
+                  </div>
+                </div>
+             )}
+
+             {activeTab === 'library' && (
+                <div className="mt-8 md:hidden">
+                  <div className="flex justify-between items-center mb-6 mt-6">
+                     <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full overflow-hidden bg-[#282828]">
+                           {firebaseUser?.photoURL && <img src={firebaseUser.photoURL} className="w-full h-full object-cover" />}
+                        </div>
+                        <h2 className="text-2xl font-bold text-white tracking-tight">Your Library</h2>
                      </div>
+                     <div className="flex items-center gap-4">
+                        <Search className="w-6 h-6 text-white" />
+                        <Plus className="w-6 h-6 text-white" />
+                     </div>
+                  </div>
+                  
+                  <div className="flex items-center gap-2 mb-6 overflow-x-auto no-scrollbar pb-2 pt-2">
+                     <button className="border border-[#727272] text-white px-4 py-1.5 rounded-full text-sm shrink-0">Playlists</button>
+                     <button className="border border-[#727272] text-white px-4 py-1.5 rounded-full text-sm shrink-0">Artists</button>
+                     <button className="border border-[#727272] text-white px-4 py-1.5 rounded-full text-sm shrink-0">Albums</button>
+                  </div>
+                  
+                  <div className="flex items-center justify-between mb-4 mt-2">
+                     <button className="flex items-center gap-2 text-white text-sm font-semibold">
+                        <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"></path></svg>
+                        Recents
+                     </button>
+                     <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"></path></svg>
+                  </div>
+
+                  <div className="flex flex-col gap-4 mt-4">
+                    <div 
+                        className="flex items-center gap-4 cursor-pointer"
+                        onClick={() => navigateTo('liked')}
+                    >
+                        <div className="w-16 h-16 rounded shadow-[0_4px_12px_rgba(0,0,0,0.5)] bg-gradient-to-br from-indigo-700 to-indigo-300 flex items-center justify-center flex-shrink-0">
+                           <Heart className="w-6 h-6 text-white fill-current" />
+                        </div>
+                        <div className="flex flex-col">
+                           <span className="text-white text-[16px] font-bold">Liked Songs</span>
+                           <span className="text-[#b3b3b3] text-[13px]">Playlist • {likedTracks.length} songs</span>
+                        </div>
+                    </div>
+                    {playlists.map(pl => (
+                       <div key={pl.id} className="flex items-center gap-4 cursor-pointer" onClick={() => navigateTo('playlist', pl.id)}>
+                          <div className="w-16 h-16 rounded overflow-hidden shadow-lg bg-[#282828] shrink-0">
+                             {pl.images && pl.images.length > 0 && <img src={pl.images[0].url} className="w-full h-full object-cover" />}
+                          </div>
+                          <div className="flex flex-col truncate">
+                             <span className="text-white text-[16px] font-bold truncate">{pl.name}</span>
+                             <span className="text-[#b3b3b3] text-[13px] truncate">Playlist • {pl.owner?.display_name || 'Spotify'}</span>
+                          </div>
+                       </div>
+                    ))}
+                    {followedArtists.map(artist => (
+                       <div key={artist} className="flex items-center gap-4 cursor-pointer" onClick={() => navigateTo('artist', artist)}>
+                          <div className="w-16 h-16 rounded-full overflow-hidden shadow-lg bg-[#282828] shrink-0">
+                             <img src={`https://ui-avatars.com/api/?name=${encodeURIComponent(artist)}&background=random`} className="w-full h-full object-cover" />
+                          </div>
+                          <div className="flex flex-col truncate">
+                             <span className="text-white text-[16px] font-bold truncate">{artist}</span>
+                             <span className="text-[#b3b3b3] text-[13px] truncate">Artist</span>
+                          </div>
+                       </div>
+                    ))}
                   </div>
                 </div>
              )}
@@ -1967,7 +2096,12 @@ export default function SpotifyDashboard() {
                    </div>
                    <div className="flex flex-col gap-2">
                       <span className="text-[#b3b3b3] text-[15px]">{getMonthlyListeners(currentTrack.artist)} monthly listeners</span>
-                      <button className="mt-2 w-fit px-4 py-1.5 border border-[#878787] rounded-full text-white text-[14px] font-bold hover:scale-105 hover:border-white transition-all">Follow</button>
+                      <button 
+                        onClick={() => setFollowedArtists(prev => prev.includes(currentTrack.artist) ? prev.filter(a => a !== currentTrack.artist) : [...prev, currentTrack.artist])}
+                        className="mt-2 w-fit px-4 py-1.5 border border-[#878787] rounded-full text-white text-[14px] font-bold hover:scale-105 hover:border-white transition-all"
+                      >
+                        {followedArtists.includes(currentTrack.artist) ? 'Following' : 'Follow'}
+                      </button>
                       <p className="text-[#b3b3b3] text-sm mt-3 line-clamp-3">you in dreamworld and u listening to dreamboy</p>
                    </div>
                  </div>
@@ -1995,12 +2129,12 @@ export default function SpotifyDashboard() {
 
       </div>
 
-      {/* Player Bar (Footer) */}
+      {/* Player Bar (Footer) - Desktop */}
       <motion.div 
         initial={{ y: 100 }}
         animate={{ y: 0 }}
         transition={{ type: "spring", stiffness: 300, damping: 30 }}
-        className="h-[90px] bg-black border-t border-[#282828] flex items-center px-4 justify-between w-full z-50 fixed bottom-0 left-0 right-0 pb-2 pt-2"
+        className="h-[90px] bg-black border-t border-[#282828] hidden md:flex items-center px-4 justify-between w-full z-50 fixed bottom-0 left-0 right-0 pb-2 pt-2"
       >
         {/* Track Info */}
         <div className="flex items-center gap-4 w-[30%] min-w-[180px]">
@@ -2127,6 +2261,159 @@ export default function SpotifyDashboard() {
           </button>
         </div>
       </motion.div>
+
+      {/* Mobile Compact Player */}
+      {currentTrack && (
+        <div className="md:hidden fixed bottom-[76px] left-2 right-2 bg-gradient-to-r from-[#1f1f1f] to-[#121212] rounded-[6px] flex items-center justify-between p-2 z-50 shadow-lg cursor-pointer" onClick={() => setIsMobilePlayerOpen(true)}>
+          <div className="flex items-center gap-3 overflow-hidden flex-1">
+            <div className="w-10 h-10 rounded overflow-hidden shrink-0 shadow-md">
+              <img src={currentTrack.coverUrl || 'https://images.unsplash.com/photo-1614680376573-df3480f0c6ff?q=80&w=200&auto=format&fit=crop'} className="w-full h-full object-cover" />
+            </div>
+            <div className="flex flex-col truncate pr-2">
+              <span className="text-white text-sm font-bold truncate">{currentTrack.title}</span>
+              <span className="text-[#b3b3b3] text-[13px] truncate">{currentTrack.artist}</span>
+            </div>
+          </div>
+          <div className="flex items-center gap-3 shrink-0 pr-2">
+            <button 
+              onClick={(e) => { e.stopPropagation(); toggleLike(currentTrack); }}
+              className={`${likedTracks.some(t => t.id === currentTrack.id) ? 'text-[#1db954]' : 'text-white'}`}
+            >
+              <Heart className={`w-5 h-5 ${likedTracks.some(t => t.id === currentTrack.id) ? 'fill-current' : ''}`} />
+            </button>
+            <button 
+              onClick={(e) => { e.stopPropagation(); togglePlayPause(); }}
+              className="text-white p-1"
+            >
+              {isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current" />}
+            </button>
+          </div>
+          <div className="absolute bottom-0 left-2 right-2 h-[2px] bg-white/20 rounded-full overflow-hidden">
+             <div className="h-full bg-white rounded-full" style={{ width: `${(progress / (duration || 1)) * 100}%` }}></div>
+          </div>
+        </div>
+      )}
+
+      {/* Mobile Bottom Navigation */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-gradient-to-t from-black via-black/95 to-transparent h-[80px] flex justify-between items-center px-6 pb-2 pt-6 z-40">
+        <button onClick={() => navigateTo('home')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'home' ? 'text-white' : 'text-[#b3b3b3] hover:text-white'}`}>
+          <Home className={`w-6 h-6 ${activeTab === 'home' ? 'fill-current' : ''}`} />
+          <span className="text-[10px] mt-1">Home</span>
+        </button>
+        <button onClick={() => navigateTo('search')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'search' ? 'text-white' : 'text-[#b3b3b3] hover:text-white'}`}>
+          <Search className={`w-6 h-6 ${activeTab === 'search' ? '' : ''}`} />
+          <span className="text-[10px] mt-1">Search</span>
+        </button>
+        <button onClick={() => navigateTo('library')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'library' || activeTab === 'playlist' ? 'text-white' : 'text-[#b3b3b3] hover:text-white'}`}>
+          <Library className={`w-6 h-6 ${activeTab === 'library' || activeTab === 'playlist' ? 'fill-current' : ''}`} />
+          <span className="text-[10px] mt-1">Your Library</span>
+        </button>
+        <button className="flex flex-col items-center gap-1 transition-colors text-[#b3b3b3] hover:text-white">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+               <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zM12 11h2v-2h-3v2h1v2zM10.5 8h3v1h-3z" />
+          </svg>
+          <span className="text-[10px] mt-1">Premium</span>
+        </button>
+      </div>
+
+      {/* Mobile Full Screen Player */}
+      <AnimatePresence>
+         {isMobilePlayerOpen && currentTrack && (
+            <motion.div 
+               initial={{ y: '100%' }}
+               animate={{ y: 0 }}
+               exit={{ y: '100%' }}
+               transition={{ type: "spring", damping: 25, stiffness: 200 }}
+               className="md:hidden fixed inset-0 z-[100] bg-gradient-to-b from-[#4a3f3b] to-black flex flex-col px-6 pt-12 pb-8"
+            >
+               {/* Header */}
+               <div className="flex justify-between items-center mb-8">
+                  <button onClick={() => setIsMobilePlayerOpen(false)} className="text-white p-1 shrink-0 bg-black/20 rounded-full hover:scale-105">
+                     <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none"><path d="M5 8.5L12 15.5L19 8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                  </button>
+                  <div className="text-center">
+                     <span className="text-[11px] uppercase text-white/70 font-semibold tracking-wider block mb-1">Playing from your library</span>
+                     <p className="text-[13px] text-white font-bold truncate max-w-[200px]">{currentTrack.album || currentTrack.artist}</p>
+                  </div>
+                  <button className="text-white p-1 shrink-0"><MoreHorizontal className="w-6 h-6" /></button>
+               </div>
+
+               {/* Cover Art */}
+               <div className="w-full aspect-square bg-[#282828] mb-10 shadow-[0_8px_40px_rgba(0,0,0,0.6)] rounded-lg overflow-hidden shrink-0 mt-4">
+                  <img src={currentTrack.coverUrl || 'https://images.unsplash.com/photo-1614680376573-df3480f0c6ff?q=80&w=600&auto=format&fit=crop'} className="w-full h-full object-cover" />
+               </div>
+
+               {/* Track Info & Like */}
+               <div className="flex justify-between items-end mb-6 mt-auto">
+                  <div className="flex flex-col pr-4 overflow-hidden">
+                     <h2 className="text-[24px] font-bold text-white truncate w-full mb-1">{currentTrack.title}</h2>
+                     <p className="text-[#b3b3b3] text-[16px] truncate w-full">{currentTrack.artist}</p>
+                  </div>
+                  <button 
+                     onClick={() => toggleLike(currentTrack)}
+                     className={`${likedTracks.some(t => t.id === currentTrack.id) ? 'text-[#1db954]' : 'text-white'} mb-1`}
+                  >
+                     <Heart className={`w-7 h-7 ${likedTracks.some(t => t.id === currentTrack.id) ? 'fill-current' : ''}`} />
+                  </button>
+               </div>
+
+               {/* Progress Bar */}
+               <div className="mb-6">
+                  <div 
+                     className="h-[4px] bg-white/20 rounded-full w-full overflow-hidden relative"
+                     onClick={(e) => {
+                        const bounds = e.currentTarget.getBoundingClientRect();
+                        const x = e.clientX - bounds.left;
+                        const percentage = x / bounds.width;
+                        if (audioRef.current) {
+                           audioRef.current.currentTime = percentage * duration;
+                           setProgress(percentage * duration);
+                        }
+                     }}
+                  >
+                     <div className="h-full bg-white rounded-full relative" style={{ width: `${(progress / (duration || 1)) * 100}%` }}></div>
+                     <div className="absolute top-1/2 -translate-y-1/2 w-3 h-3 bg-white rounded-full shadow" style={{ left: `max(0%, min(100%, calc(${(progress / (duration || 1)) * 100}% - 6px)))` }}></div>
+                  </div>
+                  <div className="flex justify-between text-[11px] text-[#b3b3b3] mt-2 font-mono">
+                     <span>{formatTime(progress)}</span>
+                     <span>{formatTime(duration)}</span>
+                  </div>
+               </div>
+
+               {/* Controls */}
+               <div className="flex justify-between items-center mb-8 px-2">
+                  <button onClick={toggleShuffle} className={`${isShuffled ? 'text-[#1db954]' : 'text-white'}`}>
+                     <Shuffle className="w-6 h-6" />
+                  </button>
+                  <button onClick={handlePrev} className="text-white">
+                     <SkipBack className="w-10 h-10 fill-current" />
+                  </button>
+                  <button onClick={togglePlayPause} className="bg-white text-black w-[68px] h-[68px] rounded-full flex items-center justify-center hover:scale-105 active:scale-95 transition-transform">
+                     {isPlaying ? <Pause className="w-8 h-8 fill-current" /> : <Play className="w-8 h-8 fill-current translate-x-[2px]" />}
+                  </button>
+                  <button onClick={() => handleNext(false)} className="text-white">
+                     <SkipForward className="w-10 h-10 fill-current" />
+                  </button>
+                  <button onClick={toggleRepeat} className={`${repeatMode !== 'off' ? 'text-[#1db954]' : 'text-white'} relative`}>
+                     {repeatMode === 'one' ? <Repeat1 className="w-6 h-6" /> : <Repeat className="w-6 h-6" />}
+                     {repeatMode !== 'off' && <div className="absolute -bottom-2 left-1/2 -translate-x-1/2 w-1.5 h-1.5 bg-[#1db954] rounded-full"></div>}
+                  </button>
+               </div>
+
+               {/* Bottom Icons */}
+               <div className="flex justify-between items-center pt-2">
+                  <button className="text-[#b3b3b3] hover:text-white transition-colors">
+                     <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M21 9v2H3V9h18zm0-4v2H3V5h18zm0 8v2H3v-2h18zm-8 4v2H3v-2h10z"/></svg>
+                  </button>
+                  <button className="text-[#b3b3b3] hover:text-white transition-colors">
+                     <ExternalLink className="w-6 h-6" />
+                  </button>
+               </div>
+
+            </motion.div>
+         )}
+      </AnimatePresence>
+
     </div>
   );
 }
