@@ -65,7 +65,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             localStorage.setItem('spotify_expires_at', newExpiresAt.toString());
           }
         } catch (error) {
-          console.error("Failed to refresh token", error);
+          console.warn("Failed to refresh token", error);
           logout();
         }
       }
@@ -79,11 +79,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async () => {
     try {
-      const res = await fetch('/api/auth/url');
+      const redirectUri = window.location.origin + '/api/callback';
+      const res = await fetch(`/api/auth/url?redirect_uri=${encodeURIComponent(redirectUri)}`);
       const { url } = await res.json();
       window.open(url, 'spotify_oauth', 'width=600,height=700');
     } catch (e) {
-      console.error("Failed to login", e);
+      console.warn("Failed to login", e);
     }
   };
 
