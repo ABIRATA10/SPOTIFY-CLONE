@@ -79,14 +79,53 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const login = async () => {
     try {
+      console.log("Starting login process...");
       const redirectUri = window.location.origin + '/api/callback';
-      const res = await fetch(`/api/auth/url?redirect_uri=${encodeURIComponent(redirectUri)}`);
-      const { url } = await res.json();
-      window.open(url, 'spotify_oauth', 'width=600,height=700');
-    } catch (e) {
-      console.warn("Failed to login", e);
+      const fetchUrl = `/api/auth/url?redirect_uri=${encodeURIComponent(redirectUri)}`;
+      console.log("Fetching: " + fetchUrl);
+      const res = await fetch(fetchUrl);
+      
+      const rawText = await res.text();
+      console.log("Raw Response Body:", rawText.slice(0, 500));
+      
+      let url = "";
+      try {
+        const parsed = JSON.parse(rawText);
+        url = parsed.url;
+      } catch (e) {
+         throw new Error("Invalid response from auth endpoint: " + rawText);
+      }
+      
+      console.log("Opening OAuth popup directly to provider:", url);
+      const authWindow = window.open(url, 'spotify_oauth', 'width=600,height=700');
+      if (!authWindow) {
+         alert("Popup blocked! Please allow popups to sign in to Spotify.");
+      }
+    } catch (e: any) {
+      console.error("Failed to login", e.message || e);
+      alert(`Failed to start Spotify Login: ${e.message || e}`);
     }
   };
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      // Allow localhost or .run.app
+      const origin = event.origin;
+      if (!origin.endsWith('.run.app') && !origin.includes('localhost')) {
+        return;
+      }
+      if (event.data?.type === 'SPOTIFY_AUTH_SUCCESS') {
+        const { access_token, refresh_token, expires_in } = event.data;
+        setAccessToken(access_token);
+        if (refresh_token) {
+           setRefreshToken(refresh_token);
+        }
+        setExpiresAt(Date.now() + expires_in * 1000);
+      }
+    };
+    window.addEventListener('message', handleMessage);
+    return () => window.removeEventListener('message', handleMessage);
+  }, []);
 
   const logout = () => {
     setAccessToken(null);

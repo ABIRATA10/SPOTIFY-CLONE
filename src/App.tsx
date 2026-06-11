@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { AuthProvider, useAuth } from "./SpotifyAuthContext";
 import SpotifyDashboard from "./SpotifyDashboard";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Check, X } from "lucide-react";
 import { auth, googleProvider } from "./firebase";
 import {
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
+  sendEmailVerification,
   onAuthStateChanged,
   User,
 } from "firebase/auth";
@@ -36,15 +37,36 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const strengthLabels = ["Weak", "Fair", "Good", "Strong", "Very Strong"];
   const strengthColors = ["bg-red-500", "bg-orange-500", "bg-yellow-500", "bg-green-400", "bg-green-500"];
 
+  const hasMinLength = password.length >= 8;
+  const hasNumber = /\d/.test(password);
+  const hasSpecialChar = /[^A-Za-z0-9]/.test(password);
+
+  const isPasswordValid = hasMinLength && hasNumber && hasSpecialChar;
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setMessage("");
+    if (!isLogin && !isPasswordValid) {
+       setError("Please meet all password requirements before signing up.");
+       return;
+    }
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        if (!userCredential.user.emailVerified) {
+            auth.signOut();
+            setError("Please verify your email before logging in. Check your inbox.");
+            return;
+        }
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await sendEmailVerification(userCredential.user);
+        setMessage("Verification email sent! Please check your inbox before logging in.");
+        setIsLogin(true);
+        // logout so they have to login after verify
+        auth.signOut();
+        return;
       }
       onAuthSuccess();
     } catch (err: any) {
@@ -178,19 +200,28 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
             </div>
           </div>
           
-          {!isLogin && password && (
+          {!isLogin && (
             <div className="mt-1 mb-2">
-              <div className="flex gap-1 h-1.5 w-full bg-[#3e3e3e] rounded-full overflow-hidden mb-1.5">
+              <div className="flex gap-1 h-1.5 w-full bg-[#3e3e3e] rounded-full overflow-hidden mb-3">
                 {[...Array(4)].map((_, i) => (
                   <div 
                     key={i} 
-                    className={`h-full flex-1 transition-all duration-300 ${i <= passwordStrength ? strengthColors[passwordStrength] : 'bg-transparent'}`}
+                    className={`h-full flex-1 transition-all duration-300 ${i <= passwordStrength - 1 && password.length > 0 ? strengthColors[passwordStrength] : 'bg-transparent'}`}
                   ></div>
                 ))}
               </div>
-              <p className={`text-xs ${strengthColors[passwordStrength].replace('bg-', 'text-')}`}>
-                 {strengthLabels[passwordStrength]} password
-              </p>
+              
+              <div className="flex flex-col gap-1.5">
+                <div className={`flex items-center gap-2 text-sm transition-colors ${hasMinLength ? 'text-[#1ed760]' : 'text-[#b3b3b3]'}`}>
+                  {hasMinLength ? <Check size={16} /> : <X size={16} />} At least 8 characters
+                </div>
+                <div className={`flex items-center gap-2 text-sm transition-colors ${hasNumber ? 'text-[#1ed760]' : 'text-[#b3b3b3]'}`}>
+                  {hasNumber ? <Check size={16} /> : <X size={16} />} At least 1 number
+                </div>
+                <div className={`flex items-center gap-2 text-sm transition-colors ${hasSpecialChar ? 'text-[#1ed760]' : 'text-[#b3b3b3]'}`}>
+                  {hasSpecialChar ? <Check size={16} /> : <X size={16} />} At least 1 special character
+                </div>
+              </div>
             </div>
           )}
 
@@ -206,7 +237,8 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
 
           <button
             type="submit"
-            className="bg-[#1ed760] text-black font-bold text-[15px] rounded-full py-3.5 mt-2 hover:scale-105 transition-transform"
+            disabled={!isLogin && !isPasswordValid}
+            className={`font-bold text-[15px] rounded-full py-3.5 mt-2 transition-all ${!isLogin && !isPasswordValid ? 'bg-[#1ed760]/50 text-black/50 cursor-not-allowed' : 'bg-[#1ed760] text-black hover:scale-105'}`}
           >
             {isLogin ? "Log In" : "Sign Up"}
           </button>
