@@ -12,6 +12,8 @@ import * as jsmediatags from 'jsmediatags/dist/jsmediatags.min.js';
 import { categories, startBrowsingCategories } from './categories';
 import { PremiumPage } from './components/PremiumPage';
 import { useAudioDB } from './hooks/useAudioDB';
+import { ProfilePhotoEditModal } from './components/ProfilePhotoEditModal';
+import { LyricsDisplay } from './components/LyricsDisplay';
 
 const getProfileImage = (user: User | null) => {
    if (!user) return null;
@@ -211,9 +213,11 @@ export default function SpotifyDashboard() {
   const [recentQueries, setRecentQueries] = useState<string[]>([]);
   const [likedTracks, setLikedTracks] = useState<Track[]>([]);
   const [sortBy, setSortBy] = useState<'relevance' | 'title' | 'artist' | 'duration'>('relevance');
+  const [librarySortOption, setLibrarySortOption] = useState<'Recent' | 'Alphabetical' | 'Creator'>('Recent');
 
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
 
   const [apiError, setApiError] = useState<string | null>(null);
   const [isOffline, setIsOffline] = useState(!navigator.onLine);
@@ -862,6 +866,20 @@ export default function SpotifyDashboard() {
 
     if (playRequestIdRef.current !== playRequestId) return; // Prevent race conditions if another song was requested
 
+    if (ytVidId) {
+        console.log("Playing original via YouTube...");
+        setIsYTMode(true);
+        setYtVideoId(ytVidId);
+        if (ytPlayerRef.current && typeof ytPlayerRef.current.loadVideoById === 'function') {
+            ytPlayerRef.current.loadVideoById(ytVidId);
+        }
+        if (audioRef.current) {
+            audioRef.current.pause();
+        }
+        setIsPlaying(true);
+        return;
+    }
+
     setIsYTMode(false);
     if (ytPlayerRef.current && typeof ytPlayerRef.current.pauseVideo === 'function') {
         ytPlayerRef.current.pauseVideo();
@@ -1285,6 +1303,15 @@ export default function SpotifyDashboard() {
      return 0; // relevance
   });
 
+  const sortedPlaylists = [...playlists].sort((a, b) => {
+     if (librarySortOption === 'Alphabetical') {
+         return (a.name || '').localeCompare(b.name || '');
+     } else if (librarySortOption === 'Creator') {
+         return (a.owner?.display_name || '').localeCompare(b.owner?.display_name || '');
+     }
+     return 0; // Natural array order maps to recent since new playlists are unshifted
+  });
+
   return (
     <div className="flex flex-col h-screen bg-black text-white font-sans overflow-hidden select-none relative pb-[140px] md:pb-[90px]">
       {isOffline && (
@@ -1342,6 +1369,21 @@ export default function SpotifyDashboard() {
              </div>
              
              {/* Library Items */}
+             <div className="px-4 pb-2 flex justify-between items-center mt-2 group relative">
+                 <div className="flex items-center gap-2 text-[#b3b3b3] hover:text-white transition-colors cursor-pointer text-sm font-semibold">
+                    <span>Sort by:</span>
+                    <select 
+                        value={librarySortOption} 
+                        onChange={(e) => setLibrarySortOption(e.target.value as any)}
+                        className="bg-transparent border-none text-white outline-none cursor-pointer focus:ring-0 [&>option]:bg-[#282828] [&>option]:text-white"
+                    >
+                        <option value="Recent">Recently Added</option>
+                        <option value="Alphabetical">Alphabetical</option>
+                        <option value="Creator">Creator</option>
+                    </select>
+                 </div>
+             </div>
+
              <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 relative">
                  <div 
                      className={`flex items-center gap-3 p-2 hover:bg-[#1a1a1a] rounded-md cursor-pointer transition-all duration-200 hover:scale-[1.01] active:scale-[0.98] group ${activeTab === 'liked' ? 'bg-[#1a1a1a]' : ''}`}
@@ -1359,7 +1401,7 @@ export default function SpotifyDashboard() {
                      </div>
                  </div>
 
-                {playlists.map((pl) => (
+                {sortedPlaylists.map((pl) => (
                     <div 
                         key={`sidebar-${pl.id}`} 
                         className={`flex items-center gap-3 p-2 hover:bg-[#1a1a1a] rounded-md cursor-pointer transition-all duration-200 hover:scale-[1.01] active:scale-[0.98] group ${activeTab === 'playlist' && viewingArtist === pl.id ? 'bg-[#1a1a1a]' : ''}`}
@@ -2351,7 +2393,7 @@ export default function SpotifyDashboard() {
                   <div className="flex items-end gap-6 mb-8 mt-12 group relative">
                      <div 
                         className="w-48 h-48 rounded-full shadow-[0_8px_24px_rgba(0,0,0,0.5)] bg-[#282828] flex items-center justify-center flex-shrink-0 overflow-hidden relative group cursor-pointer"
-                        onClick={() => document.getElementById('profile-upload')?.click()}
+                        onClick={() => setIsProfileModalOpen(true)}
                      >
                         {getProfileImage(firebaseUser) ? (
                            <img src={getProfileImage(firebaseUser)!} className="w-full h-full object-cover group-hover:opacity-50 transition-opacity" alt="Profile" />
@@ -2364,26 +2406,6 @@ export default function SpotifyDashboard() {
                               <span className="text-sm font-bold text-white drop-shadow-md">Change picture</span>
                            </div>
                         </div>
-                        <input
-                           id="profile-upload"
-                           type="file"
-                           accept="image/*"
-                           className="hidden"
-                           onChange={async (e) => {
-                              if (e.target.files && e.target.files[0] && firebaseUser) {
-                                 try {
-                                    const file = e.target.files[0];
-                                    const storageRef = ref(storage, `profiles/${firebaseUser.uid}/${Date.now()}`);
-                                    const uploadTask = await uploadBytesResumable(storageRef, file);
-                                    const downloadURL = await getDownloadURL(uploadTask.ref);
-                                    await updateProfile(firebaseUser, { photoURL: downloadURL });
-                                    setFirebaseUser({...firebaseUser, photoURL: downloadURL} as User);
-                                 } catch (err) {
-                                    console.error("Profile picture update failed", err);
-                                 }
-                              }
-                           }}
-                        />
                      </div>
                      <div className="flex flex-col flex-1">
                         <span className="text-sm font-bold text-white block mb-2 uppercase">Profile</span>
@@ -2462,11 +2484,19 @@ export default function SpotifyDashboard() {
                      <button className="border border-[#727272] text-white px-4 py-1.5 rounded-full text-sm shrink-0">Albums</button>
                   </div>
                   
-                  <div className="flex items-center justify-between mb-4 mt-2">
-                     <button className="flex items-center gap-2 text-white text-sm font-semibold">
+                  <div className="flex items-center justify-between mb-4 mt-2 px-2">
+                     <div className="flex items-center gap-2 text-white text-sm font-semibold relative">
                         <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 5v14M5 12h14"></path></svg>
-                        Recents
-                     </button>
+                        <select 
+                           value={librarySortOption} 
+                           onChange={(e) => setLibrarySortOption(e.target.value as any)}
+                           className="bg-transparent text-white outline-none appearance-none cursor-pointer focus:ring-0 [&>option]:bg-[#282828] [&>option]:text-white"
+                        >
+                           <option value="Recent">Recents</option>
+                           <option value="Alphabetical">Alphabetical</option>
+                           <option value="Creator">Creator</option>
+                        </select>
+                     </div>
                      <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="currentColor"><path d="M3 6h18v2H3V6zm0 5h18v2H3v-2zm0 5h18v2H3v-2z"></path></svg>
                   </div>
 
@@ -2483,7 +2513,7 @@ export default function SpotifyDashboard() {
                            <span className="text-[#b3b3b3] text-[13px]">Playlist • {likedTracks.length} songs</span>
                         </div>
                     </div>
-                    {playlists.map(pl => (
+                    {sortedPlaylists.map(pl => (
                        <div key={pl.id} className="flex items-center gap-4 cursor-pointer" onClick={() => navigateTo('playlist', pl.id)}>
                           <div className="w-16 h-16 rounded overflow-hidden shadow-lg bg-[#282828] shrink-0">
                              {pl.images && pl.images.length > 0 && <img src={pl.images[0].url} className="w-full h-full object-cover" />}
@@ -2624,6 +2654,12 @@ export default function SpotifyDashboard() {
                     <Heart className={`w-6 h-6 ${likedTracks.some(t => t.id === currentTrack.id) ? 'fill-current' : ''}`} />
                  </button>
                </div>
+
+               <LyricsDisplay 
+                   artist={currentTrack.artist} 
+                   title={currentTrack.title} 
+                   currentTime={progress} 
+               />
 
                <div className="bg-[#242424] rounded-lg overflow-hidden group cursor-pointer hover:bg-[#282828] transition-colors shrink-0 mb-4">
                  <div className="relative w-full h-[180px]">
@@ -2889,10 +2925,11 @@ export default function SpotifyDashboard() {
                animate={{ y: 0 }}
                exit={{ y: '100%' }}
                transition={{ type: "spring", damping: 25, stiffness: 200 }}
-               className="md:hidden fixed inset-0 z-[100] bg-gradient-to-b from-[#4a3f3b] to-black flex flex-col px-6 pt-12 pb-8"
+               className="md:hidden fixed inset-0 z-[100] bg-gradient-to-b from-[#4a3f3b] to-black flex flex-col pt-12 pb-8 overflow-y-auto"
             >
+               <div className="px-6 flex flex-col flex-1 shrink-0 min-h-max">
                {/* Header */}
-               <div className="flex justify-between items-center mb-8">
+               <div className="flex justify-between items-center mb-8 shrink-0">
                   <button onClick={() => setIsMobilePlayerOpen(false)} className="text-white p-1 shrink-0 bg-black/20 rounded-full hover:scale-105">
                      <svg className="w-6 h-6" viewBox="0 0 24 24" fill="none"><path d="M5 8.5L12 15.5L19 8.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/></svg>
                   </button>
@@ -2969,7 +3006,7 @@ export default function SpotifyDashboard() {
                </div>
 
                {/* Bottom Icons */}
-               <div className="flex justify-between items-center pt-2">
+               <div className="flex justify-between items-center pt-2 mb-8 shrink-0">
                   <button className="text-[#b3b3b3] hover:text-white transition-colors">
                      <svg viewBox="0 0 24 24" width="22" height="22" fill="currentColor"><path d="M21 9v2H3V9h18zm0-4v2H3V5h18zm0 8v2H3v-2h18zm-8 4v2H3v-2h10z"/></svg>
                   </button>
@@ -2978,6 +3015,15 @@ export default function SpotifyDashboard() {
                   </button>
                </div>
 
+               <div className="shrink-0 mb-8">
+                  <LyricsDisplay 
+                      artist={currentTrack.artist} 
+                      title={currentTrack.title} 
+                      currentTime={progress} 
+                  />
+               </div>
+
+               </div>
             </motion.div>
          )}
       </AnimatePresence>
@@ -3041,6 +3087,19 @@ export default function SpotifyDashboard() {
          onVolumeChange={() => setVolume(audioRef.current?.volume || 1)}
       />
 
+      <ProfilePhotoEditModal 
+         isOpen={isProfileModalOpen} 
+         onClose={() => setIsProfileModalOpen(false)} 
+         onUploadFile={async (file: File) => {
+             if (firebaseUser) {
+                 const storageRef = ref(storage, `profiles/${firebaseUser.uid}/${Date.now()}`);
+                 const uploadTask = await uploadBytesResumable(storageRef, file);
+                 const downloadURL = await getDownloadURL(uploadTask.ref);
+                 await updateProfile(firebaseUser, { photoURL: downloadURL });
+                 setFirebaseUser({...firebaseUser, photoURL: downloadURL} as User);
+             }
+         }} 
+      />
     </div>
   );
 }
