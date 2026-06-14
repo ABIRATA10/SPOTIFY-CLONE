@@ -4,6 +4,7 @@ interface AuthContextType {
   accessToken: string | null;
   isAuthenticated: boolean;
   login: () => void;
+  bypass: () => void;
   logout: () => void;
 }
 
@@ -127,6 +128,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('message', handleMessage);
   }, []);
 
+  const bypass = () => {
+    setAccessToken('local_bypass');
+    localStorage.setItem('spotify_access_token', 'local_bypass');
+  };
+
   const logout = () => {
     setAccessToken(null);
     setRefreshToken(null);
@@ -137,7 +143,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ accessToken, isAuthenticated: !!accessToken, login, logout }}>
+    <AuthContext.Provider value={{ accessToken, isAuthenticated: !!accessToken, login, bypass, logout }}>
       {children}
     </AuthContext.Provider>
   );

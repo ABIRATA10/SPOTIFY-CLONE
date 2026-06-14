@@ -40,6 +40,10 @@ service cloud.firestore {
                          incoming().likedAt == request.time;
         allow delete: if isOwner(userId);
       }
+
+      match /playlists/{playlistId} {
+        allow list, get, create, update, delete: if isOwner(userId);
+      }
     }
 
     function isValidPlaylist(data) {

@@ -21,6 +21,8 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
 
   const calculatePasswordStrength = (pwd: string) => {
     let score = 0;
@@ -74,16 +76,19 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
     }
   };
 
-  const handleForgotPassword = async () => {
-    if (!email) {
-      setError("Please enter your email address first.");
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail) {
+      setError("Please enter your email address.");
       return;
     }
     setError("");
     setMessage("");
     try {
-      await sendPasswordResetEmail(auth, email);
+      await sendPasswordResetEmail(auth, resetEmail);
       setMessage("Password reset email sent. Please check your inbox.");
+      setShowResetModal(false);
+      setResetEmail("");
     } catch (err: any) {
       setError(err.message || "Failed to send reset email");
     }
@@ -228,7 +233,10 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
           {isLogin && (
             <button 
               type="button" 
-              onClick={handleForgotPassword}
+              onClick={() => {
+                setShowResetModal(true);
+                setResetEmail(email);
+              }}
               className="text-white hover:text-[#1ed760] font-bold text-sm text-left hover:underline mb-2 transition-colors self-start"
             >
               Forgot your password?
@@ -257,13 +265,64 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
           </button>
         </div>
       </div>
+
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#282828] p-6 rounded-lg w-full max-w-md shadow-2xl border border-[#3f3f3f]">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-white">Reset Password</h2>
+              <button 
+                onClick={() => setShowResetModal(false)} 
+                className="text-[#b3b3b3] hover:text-white transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <p className="text-[#b3b3b3] text-sm mb-4">
+              Enter your email address and we'll send you a link to reset your password.
+            </p>
+            <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
+              <input
+                type="email"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                placeholder="Email address"
+                className="bg-[#3e3e3e] text-white px-4 py-3 rounded text-[15px] border border-transparent focus:border-white outline-none transition-colors"
+                required
+              />
+              <div className="flex gap-4 justify-end mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowResetModal(false)}
+                  className="px-6 py-2.5 rounded-full border border-[#b3b3b3] text-white font-bold hover:scale-105 hover:border-white transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 rounded-full bg-[#1ed760] text-black font-bold hover:scale-105 transition-transform"
+                >
+                  Send Link
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // Spotify Auth Setup
 function SpotifyAuthScreen() {
-  const { login } = useAuth();
+  const { login, bypass } = useAuth();
+  const [authErr, setAuthErr] = useState("");
+  useEffect(() => {
+     const p = new URLSearchParams(window.location.search);
+     const err = p.get('error');
+     if (err) setAuthErr(err);
+  }, []);
+  
   return (
     <div className="flex flex-col h-screen bg-black items-center justify-center font-sans">
       <div className="flex flex-col items-center gap-8 max-w-lg text-center pl-4 pr-4">
@@ -281,12 +340,25 @@ function SpotifyAuthScreen() {
           Connect your Spotify account to access your playlists, artists, and
           liked songs.
         </p>
-        <button
-          onClick={login}
-          className="bg-[#1ed760] text-black font-bold text-lg rounded-full py-3.5 px-10 hover:scale-105 transition-transform mt-2"
-        >
-          Connect Spotify Account
-        </button>
+        {authErr && (
+           <p className="text-red-500 font-bold bg-red-500/10 px-4 py-2 rounded-md">
+             Authentication failed: {authErr === 'invalid_grant' ? 'Session expired or redirect mismatch. Please try connecting again.' : authErr}
+           </p>
+         )}
+        <div className="flex flex-col gap-4 w-full px-6">
+          <button
+            onClick={login}
+            className="w-full bg-[#1ed760] text-black font-bold text-lg rounded-full py-3.5 hover:scale-105 transition-transform"
+          >
+            Connect Spotify Account
+          </button>
+          <button
+            onClick={bypass}
+            className="w-full bg-transparent border border-[#878787] text-white hover:border-white font-bold text-lg rounded-full py-3.5 hover:scale-105 transition-transform"
+          >
+            Skip & Use Standalone Player
+          </button>
+        </div>
       </div>
     </div>
   );
