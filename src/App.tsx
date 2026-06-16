@@ -1,13 +1,15 @@
 import React, { useState, useEffect } from "react";
 import { AuthProvider, useAuth } from "./SpotifyAuthContext";
 import SpotifyDashboard from "./SpotifyDashboard";
-import { Eye, EyeOff } from "lucide-react";
+import { Eye, EyeOff, Check, X, Wifi, WifiOff } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { auth, googleProvider } from "./firebase";
 import {
   signInWithPopup,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   sendPasswordResetEmail,
+  sendEmailVerification,
   onAuthStateChanged,
   User,
 } from "firebase/auth";
@@ -20,6 +22,8 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [showResetModal, setShowResetModal] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
 
   const calculatePasswordStrength = (pwd: string) => {
     let score = 0;
@@ -36,15 +40,36 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
   const strengthLabels = ["Weak", "Fair", "Good", "Strong", "Very Strong"];
   const strengthColors = ["bg-red-500", "bg-orange-500", "bg-yellow-500", "bg-green-400", "bg-green-500"];
 
+  const hasMinLength = password.length >= 8;
+  const hasNumber = /\d/.test(password);
+  const hasSpecialChar = /[^A-Za-z0-9]/.test(password);
+
+  const isPasswordValid = hasMinLength && hasNumber && hasSpecialChar;
+
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
     setMessage("");
+    if (!isLogin && !isPasswordValid) {
+       setError("Please meet all password requirements before signing up.");
+       return;
+    }
     try {
       if (isLogin) {
-        await signInWithEmailAndPassword(auth, email, password);
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        if (!userCredential.user.emailVerified) {
+            auth.signOut();
+            setError("Please verify your email before logging in. Check your inbox.");
+            return;
+        }
       } else {
-        await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        await sendEmailVerification(userCredential.user);
+        setMessage("Verification email sent! Please check your inbox before logging in.");
+        setIsLogin(true);
+        // logout so they have to login after verify
+        auth.signOut();
+        return;
       }
       onAuthSuccess();
     } catch (err: any) {
@@ -52,16 +77,19 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
     }
   };
 
-  const handleForgotPassword = async () => {
-    if (!email) {
-      setError("Please enter your email address first.");
+  const handleForgotPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail) {
+      setError("Please enter your email address.");
       return;
     }
     setError("");
     setMessage("");
     try {
-      await sendPasswordResetEmail(auth, email);
+      await sendPasswordResetEmail(auth, resetEmail);
       setMessage("Password reset email sent. Please check your inbox.");
+      setShowResetModal(false);
+      setResetEmail("");
     } catch (err: any) {
       setError(err.message || "Failed to send reset email");
     }
@@ -178,26 +206,38 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
             </div>
           </div>
           
-          {!isLogin && password && (
+          {!isLogin && (
             <div className="mt-1 mb-2">
-              <div className="flex gap-1 h-1.5 w-full bg-[#3e3e3e] rounded-full overflow-hidden mb-1.5">
+              <div className="flex gap-1 h-1.5 w-full bg-[#3e3e3e] rounded-full overflow-hidden mb-3">
                 {[...Array(4)].map((_, i) => (
                   <div 
                     key={i} 
-                    className={`h-full flex-1 transition-all duration-300 ${i <= passwordStrength ? strengthColors[passwordStrength] : 'bg-transparent'}`}
+                    className={`h-full flex-1 transition-all duration-300 ${i <= passwordStrength - 1 && password.length > 0 ? strengthColors[passwordStrength] : 'bg-transparent'}`}
                   ></div>
                 ))}
               </div>
-              <p className={`text-xs ${strengthColors[passwordStrength].replace('bg-', 'text-')}`}>
-                 {strengthLabels[passwordStrength]} password
-              </p>
+              
+              <div className="flex flex-col gap-1.5">
+                <div className={`flex items-center gap-2 text-sm transition-colors ${hasMinLength ? 'text-[#1ed760]' : 'text-[#b3b3b3]'}`}>
+                  {hasMinLength ? <Check size={16} /> : <X size={16} />} At least 8 characters
+                </div>
+                <div className={`flex items-center gap-2 text-sm transition-colors ${hasNumber ? 'text-[#1ed760]' : 'text-[#b3b3b3]'}`}>
+                  {hasNumber ? <Check size={16} /> : <X size={16} />} At least 1 number
+                </div>
+                <div className={`flex items-center gap-2 text-sm transition-colors ${hasSpecialChar ? 'text-[#1ed760]' : 'text-[#b3b3b3]'}`}>
+                  {hasSpecialChar ? <Check size={16} /> : <X size={16} />} At least 1 special character
+                </div>
+              </div>
             </div>
           )}
 
           {isLogin && (
             <button 
               type="button" 
-              onClick={handleForgotPassword}
+              onClick={() => {
+                setShowResetModal(true);
+                setResetEmail(email);
+              }}
               className="text-white hover:text-[#1ed760] font-bold text-sm text-left hover:underline mb-2 transition-colors self-start"
             >
               Forgot your password?
@@ -206,7 +246,8 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
 
           <button
             type="submit"
-            className="bg-[#1ed760] text-black font-bold text-[15px] rounded-full py-3.5 mt-2 hover:scale-105 transition-transform"
+            disabled={!isLogin && !isPasswordValid}
+            className={`font-bold text-[15px] rounded-full py-3.5 mt-2 transition-all ${!isLogin && !isPasswordValid ? 'bg-[#1ed760]/50 text-black/50 cursor-not-allowed' : 'bg-[#1ed760] text-black hover:scale-105'}`}
           >
             {isLogin ? "Log In" : "Sign Up"}
           </button>
@@ -225,13 +266,64 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
           </button>
         </div>
       </div>
+
+      {showResetModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+          <div className="bg-[#282828] p-6 rounded-lg w-full max-w-md shadow-2xl border border-[#3f3f3f]">
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold text-white">Reset Password</h2>
+              <button 
+                onClick={() => setShowResetModal(false)} 
+                className="text-[#b3b3b3] hover:text-white transition-colors"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <p className="text-[#b3b3b3] text-sm mb-4">
+              Enter your email address and we'll send you a link to reset your password.
+            </p>
+            <form onSubmit={handleForgotPassword} className="flex flex-col gap-4">
+              <input
+                type="email"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                placeholder="Email address"
+                className="bg-[#3e3e3e] text-white px-4 py-3 rounded text-[15px] border border-transparent focus:border-white outline-none transition-colors"
+                required
+              />
+              <div className="flex gap-4 justify-end mt-4">
+                <button
+                  type="button"
+                  onClick={() => setShowResetModal(false)}
+                  className="px-6 py-2.5 rounded-full border border-[#b3b3b3] text-white font-bold hover:scale-105 hover:border-white transition-all"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-6 py-2.5 rounded-full bg-[#1ed760] text-black font-bold hover:scale-105 transition-transform"
+                >
+                  Send Link
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
 
 // Spotify Auth Setup
 function SpotifyAuthScreen() {
-  const { login } = useAuth();
+  const { login, bypass } = useAuth();
+  const [authErr, setAuthErr] = useState("");
+  useEffect(() => {
+     const p = new URLSearchParams(window.location.search);
+     const err = p.get('error');
+     if (err) setAuthErr(err);
+  }, []);
+  
   return (
     <div className="flex flex-col h-screen bg-black items-center justify-center font-sans">
       <div className="flex flex-col items-center gap-8 max-w-lg text-center pl-4 pr-4">
@@ -249,12 +341,25 @@ function SpotifyAuthScreen() {
           Connect your Spotify account to access your playlists, artists, and
           liked songs.
         </p>
-        <button
-          onClick={login}
-          className="bg-[#1ed760] text-black font-bold text-lg rounded-full py-3.5 px-10 hover:scale-105 transition-transform mt-2"
-        >
-          Connect Spotify Account
-        </button>
+        {authErr && (
+           <p className="text-red-500 font-bold bg-red-500/10 px-4 py-2 rounded-md">
+             Authentication failed: {authErr === 'invalid_grant' ? 'Session expired or redirect mismatch. Please try connecting again.' : authErr}
+           </p>
+         )}
+        <div className="flex flex-col gap-4 w-full px-6">
+          <button
+            onClick={login}
+            className="w-full bg-[#1ed760] text-black font-bold text-lg rounded-full py-3.5 hover:scale-105 transition-transform"
+          >
+            Connect Spotify Account
+          </button>
+          <button
+            onClick={bypass}
+            className="w-full bg-transparent border border-[#878787] text-white hover:border-white font-bold text-lg rounded-full py-3.5 hover:scale-105 transition-transform"
+          >
+            Skip & Use Standalone Player
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -286,9 +391,72 @@ function MainLayout() {
 }
 
 export default function App() {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [showBackOnline, setShowBackOnline] = useState(false);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setShowBackOnline(true);
+      const timer = setTimeout(() => {
+        setShowBackOnline(false);
+      }, 4000);
+      return () => clearTimeout(timer);
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setShowBackOnline(false);
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
   return (
     <AuthProvider>
       <MainLayout />
+      <AnimatePresence>
+        {!isOnline && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999]"
+          >
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-[#18181a] text-amber-500 text-sm font-semibold rounded-full shadow-2xl border border-amber-500/20 backdrop-blur-md">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+              </span>
+              <WifiOff className="w-4 h-4 text-amber-500 shrink-0" />
+              <span>No Internet Connection</span>
+            </div>
+          </motion.div>
+        )}
+
+        {showBackOnline && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999]"
+          >
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-[#18181a] text-[#1db954] text-sm font-semibold rounded-full shadow-2xl border border-[#1db954]/20 backdrop-blur-md">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1db954] opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#1db954]"></span>
+              </span>
+              <Wifi className="w-4 h-4 text-[#1db954] shrink-0" />
+              <span>Back Online</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </AuthProvider>
   );
 }
