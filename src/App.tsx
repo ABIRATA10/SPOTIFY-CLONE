@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { AuthProvider, useAuth } from "./SpotifyAuthContext";
 import SpotifyDashboard from "./SpotifyDashboard";
-import { Eye, EyeOff, Check, X } from "lucide-react";
+import { Eye, EyeOff, Check, X, Wifi, WifiOff } from "lucide-react";
+import { motion, AnimatePresence } from "motion/react";
 import { auth, googleProvider } from "./firebase";
 import {
   signInWithPopup,
@@ -390,9 +391,72 @@ function MainLayout() {
 }
 
 export default function App() {
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
+  const [showBackOnline, setShowBackOnline] = useState(false);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      setShowBackOnline(true);
+      const timer = setTimeout(() => {
+        setShowBackOnline(false);
+      }, 4000);
+      return () => clearTimeout(timer);
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setShowBackOnline(false);
+    };
+
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
   return (
     <AuthProvider>
       <MainLayout />
+      <AnimatePresence>
+        {!isOnline && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999]"
+          >
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-[#18181a] text-amber-500 text-sm font-semibold rounded-full shadow-2xl border border-amber-500/20 backdrop-blur-md">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+              </span>
+              <WifiOff className="w-4 h-4 text-amber-500 shrink-0" />
+              <span>No Internet Connection</span>
+            </div>
+          </motion.div>
+        )}
+
+        {showBackOnline && (
+          <motion.div
+            initial={{ opacity: 0, y: -50, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -20, scale: 0.95 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-[9999]"
+          >
+            <div className="flex items-center gap-3 px-4 py-2.5 bg-[#18181a] text-[#1db954] text-sm font-semibold rounded-full shadow-2xl border border-[#1db954]/20 backdrop-blur-md">
+              <span className="relative flex h-2 w-2">
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#1db954] opacity-75"></span>
+                <span className="relative inline-flex rounded-full h-2 w-2 bg-[#1db954]"></span>
+              </span>
+              <Wifi className="w-4 h-4 text-[#1db954] shrink-0" />
+              <span>Back Online</span>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </AuthProvider>
   );
 }

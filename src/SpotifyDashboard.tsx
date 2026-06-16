@@ -15,6 +15,53 @@ import { useAudioDB } from './hooks/useAudioDB';
 import { ProfilePhotoEditModal } from './components/ProfilePhotoEditModal';
 import { LyricsDisplay } from './components/LyricsDisplay';
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  };
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
+
 const getProfileImage = (user: User | null) => {
    if (!user) return null;
    if (user.photoURL) return user.photoURL;
@@ -359,6 +406,7 @@ export default function SpotifyDashboard() {
         }
       } catch (e) {
         console.warn("Failed to fetch custom playlists", e);
+        handleFirestoreError(e, OperationType.LIST, `users/${firebaseUser.uid}/playlists`);
       }
     };
     fetchCustomPlaylists();
@@ -373,7 +421,7 @@ export default function SpotifyDashboard() {
       })
       .catch(e => console.warn("Could not fetch tracks:", e));
 
-    if (accessToken) {
+    if (accessToken && accessToken !== 'local_bypass') {
       fetch('https://api.spotify.com/v1/me/playlists?limit=20', {
         headers: {
           'Authorization': `Bearer ${accessToken}`
@@ -688,6 +736,7 @@ export default function SpotifyDashboard() {
            requestAnimationFrame(() => alert(`Created playlist "${playlistName}" & added "${track.title}"`));
        } catch (err) {
            console.error("Failed to create playlist in Firestore", err);
+           handleFirestoreError(err, OperationType.CREATE, `users/${firebaseUser.uid}/playlists/${newId}`);
        }
        setPlaylistSelectTrack(null);
        return;
@@ -726,6 +775,7 @@ export default function SpotifyDashboard() {
         }));
     } catch (e) {
         console.error("Failed to add to custom playlist", e);
+        handleFirestoreError(e, OperationType.UPDATE, `users/${firebaseUser.uid}/playlists/${playlistId}`);
     }
     setPlaylistSelectTrack(null);
   };
@@ -1075,6 +1125,7 @@ export default function SpotifyDashboard() {
         });
     } catch (e) {
         console.error("error creating playlist", e);
+        handleFirestoreError(e, OperationType.CREATE, `users/${firebaseUser.uid}/playlists/${targetId}`);
     }
   };
 
@@ -1170,6 +1221,10 @@ export default function SpotifyDashboard() {
      }
      return 0; 
   });
+
+  const isCurrentSearchPlaying = sortedSearchResults.length > 0 &&
+    (originalQueue.length > 0 ? originalQueue : queue).length === sortedSearchResults.length &&
+    (originalQueue.length > 0 ? originalQueue : queue).every((t, idx) => t && sortedSearchResults[idx] && t.id === sortedSearchResults[idx].id);
 
   const sortedPlaylists = [...playlists].sort((a, b) => {
      if (librarySortOption === 'Alphabetical') {
@@ -1743,14 +1798,14 @@ export default function SpotifyDashboard() {
                                 </button>
                                 <button 
                                   className={`absolute bottom-2 right-2 bg-[#1db954] text-black w-12 h-12 rounded-full flex items-center justify-center shadow-xl hover:scale-105 hover:bg-[#1ed760] transition-all transform duration-300 
-                                    ${queue === sortedSearchResults && currentTrackIndex === i && isPlaying ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0'}`}
+                                    ${isCurrentSearchPlaying && currentTrackIndex === i && isPlaying ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4 group-hover:opacity-100 group-hover:translate-y-0'}`}
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleTrackSelect(i, sortedSearchResults);
                                     addToSearchHistory(item);
                                   }}
                                 >
-                                   {queue === sortedSearchResults && currentTrackIndex === i && isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-1" />}
+                                   {isCurrentSearchPlaying && currentTrackIndex === i && isPlaying ? <Pause className="w-6 h-6 fill-current" /> : <Play className="w-6 h-6 fill-current ml-1" />}
                                 </button>
                             </div>
                             <div className="flex flex-col flex-1 h-full">
@@ -1936,6 +1991,9 @@ export default function SpotifyDashboard() {
                 const pl = playlists.find(p => p.id === viewingArtist);
                 if (!pl) return <div className="p-8 text-white">Playlist not found</div>;
                 const plTracks = (pl.tracks.items || []).map(it => it.track);
+                const isCurrentPlaylistPlaying = plTracks.length > 0 && 
+                  (originalQueue.length > 0 ? originalQueue : queue).length === plTracks.length &&
+                  (originalQueue.length > 0 ? originalQueue : queue).every((t, idx) => t && plTracks[idx] && t.id === plTracks[idx].id);
                 return (
                  <div className="mt-8">
                    <div className="flex items-end gap-6 mb-8 mt-4 group relative">
@@ -1968,6 +2026,7 @@ export default function SpotifyDashboard() {
                                        await setDoc(docRef, { name: newName }, { merge: true });
                                    } catch (err) {
                                        console.error("Failed to rename playlist in Firestore", err);
+                                       handleFirestoreError(err, OperationType.UPDATE, `users/${firebaseUser.uid}/playlists/${pl.id}`);
                                    }
                                }
                            }}
@@ -1986,7 +2045,7 @@ export default function SpotifyDashboard() {
                         onClick={() => handleTrackSelect(0, plTracks)}
                         disabled={plTracks.length === 0}
                       >
-                        {queue === plTracks && isPlaying ? <Pause className="w-7 h-7 fill-current" /> : <Play className="w-7 h-7 fill-current ml-1" />}
+                        {isCurrentPlaylistPlaying && isPlaying ? <Pause className="w-7 h-7 fill-current" /> : <Play className="w-7 h-7 fill-current ml-1" />}
                       </button>
                       <button 
                          className="text-[#b3b3b3] hover:text-white transition-colors"
@@ -2048,24 +2107,24 @@ export default function SpotifyDashboard() {
                          {plTracks.map((item, i) => (
                             <div 
                               key={`pltrack-${item.id}-${i}`} 
-                              className={`flex items-center justify-between p-2 rounded-md hover:bg-[#2a2a2a] group cursor-pointer ${queue === plTracks && currentTrackIndex === i ? 'bg-[#2a2a2a]' : ''}`}
+                              className={`flex items-center justify-between p-2 rounded-md hover:bg-[#2a2a2a] group cursor-pointer ${isCurrentPlaylistPlaying && queue[currentTrackIndex]?.id === item.id ? 'bg-[#2a2a2a]' : ''}`}
                               onClick={() => handleTrackSelect(i, plTracks)}
                               onContextMenu={(e) => handleTrackContextMenu(e, item)}
                             >
                                <div className="flex items-center gap-4 flex-1">
                                   <div className="w-8 flex justify-center text-[#b3b3b3] group-hover:hidden">
-                                    {queue === plTracks && currentTrackIndex === i && isPlaying ? (
+                                    {isCurrentPlaylistPlaying && queue[currentTrackIndex]?.id === item.id && isPlaying ? (
                                          <EqualizerIcon />
                                     ) : (
-                                         <span className={queue === plTracks && currentTrackIndex === i ? "text-[#1db954]" : ""}>{i + 1}</span>
+                                         <span className={isCurrentPlaylistPlaying && queue[currentTrackIndex]?.id === item.id ? "text-[#1db954]" : ""}>{i + 1}</span>
                                     )}
                                   </div>
                                   <div className="w-8 justify-center hidden group-hover:flex">
-                                     {queue === plTracks && currentTrackIndex === i && isPlaying ? <Pause className="w-4 h-4 text-white" /> : <Play className="w-4 h-4 text-white" />}
+                                     {isCurrentPlaylistPlaying && queue[currentTrackIndex]?.id === item.id && isPlaying ? <Pause className="w-4 h-4 text-white" /> : <Play className="w-4 h-4 text-white" />}
                                   </div>
                                   <img src={item.coverUrl} className="w-10 h-10 rounded object-cover shadow-sm" alt="" />
                                   <div className="flex-1 flex flex-col">
-                                     <span className={`hover:underline truncate text-[15px] ${queue === plTracks && currentTrackIndex === i ? "text-[#1db954]" : "text-white"}`}>{item.title}</span>
+                                     <span className={`hover:underline truncate text-[15px] ${isCurrentPlaylistPlaying && queue[currentTrackIndex]?.id === item.id ? "text-[#1db954]" : "text-white"}`}>{item.title}</span>
                                      <span 
                                         className="text-[#b3b3b3] hover:text-white hover:underline truncate text-sm"
                                         onClick={(e) => {
