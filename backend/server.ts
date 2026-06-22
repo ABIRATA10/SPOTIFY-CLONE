@@ -457,6 +457,50 @@ app.get("/api/callback", async (req, res) => {
   }
 });
 
+// Generic proxy endpoint for Spotify Web API requests
+app.all("/api/spotify-proxy/*all", async (req, res) => {
+  const token = req.headers.authorization;
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized: Missing Spotify Access Token in Authorization header" });
+  }
+
+  // Extract path suffix
+  const pathSuffix = (req.params as any).all || "";
+  const queryParams = new URLSearchParams(req.query as any).toString();
+  const spotifyUrl = `https://api.spotify.com/v1/${pathSuffix}${queryParams ? '?' + queryParams : ''}`;
+
+  try {
+    const headers: Record<string, string> = {
+      "Authorization": token,
+      "Content-Type": "application/json"
+    };
+
+    const fetchOptions: RequestInit = {
+      method: req.method,
+      headers
+    };
+
+    if (["POST", "PUT", "PATCH"].includes(req.method) && req.body) {
+      fetchOptions.body = JSON.stringify(req.body);
+    }
+
+    const spotifyResponse = await fetch(spotifyUrl, fetchOptions);
+    const contentType = spotifyResponse.headers.get("content-type");
+
+    res.status(spotifyResponse.status);
+    if (contentType && contentType.includes("application/json")) {
+      const data = await spotifyResponse.json();
+      return res.json(data);
+    } else {
+      const text = await spotifyResponse.text();
+      return res.send(text);
+    }
+  } catch (error: any) {
+    console.error("Spotify API Proxy Error:", error);
+    return res.status(500).json({ error: error.message || "Failed to proxy request to Spotify" });
+  }
+});
+
 // Setup Vite middleware
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {

@@ -4,6 +4,7 @@ import cookieParser from "cookie-parser";
 import dotenv from "dotenv";
 import YTMusic from "ytmusic-api";
 import ytdl from "@distube/ytdl-core";
+import play from "play-dl";
 
 dotenv.config();
 
@@ -186,22 +187,57 @@ app.get("/api/stream/:videoId", async (req, res) => {
     }
   }
 
-  // 2. If no iTunes match is found or no metadata is available, attempt to load YouTube stream with ytdl
+  // 2. Try streaming with play-dl first (fully bypasses YouTube's "Sign in to confirm you're not a bot" restriction)
   try {
-    res.setHeader('Content-Type', 'audio/mpeg');
-    const stream = ytdl(`https://www.youtube.com/watch?v=${videoId}`, { filter: 'audioonly', quality: 'highestaudio' });
+    const videoUrl = `https://www.youtube.com/watch?v=${videoId}`;
+    console.log(`[Stream Proxy] Attempting play-dl stream for videoId: ${videoId}`);
+    const streamInfo = await play.stream(videoUrl).catch((e: any) => {
+      console.warn("[Stream Proxy] play-dl stream error during fetch:", e.message || e);
+      return null;
+    });
+
+    if (streamInfo && streamInfo.stream) {
+      if (!res.headersSent) {
+        res.setHeader('Content-Type', 'audio/mpeg');
+      }
+      streamInfo.stream.on('error', (err: any) => {
+         console.warn("[Stream Proxy] play-dl execution stream error:", err.message);
+         if (!res.headersSent) {
+            return res.redirect(fallbackUrl);
+         }
+      });
+      streamInfo.stream.pipe(res);
+      return;
+    }
+  } catch (err: any) {
+    console.warn("[Stream Proxy] play-dl wrapper error, falling back to ytdl...", err.message || err);
+  }
+
+  // 3. Fallback to @distube/ytdl-core if play-dl failed
+  try {
+    const stream = ytdl(`https://www.youtube.com/watch?v=${videoId}`, { 
+      filter: 'audioonly', 
+      quality: 'highestaudio',
+      requestOptions: {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
+      }
+    });
     
     stream.on('error', (err: any) => {
-       console.warn("[Stream Proxy] ytdl stream error:", err.message);
+       console.warn("[Stream Proxy] ytdl stream executed with error:", err.message);
        if (!res.headersSent) {
-          // Send high-quality unique deterministic preview fallback to prevent silence/broken play
           return res.redirect(fallbackUrl);
        }
     });
 
+    if (!res.headersSent) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+    }
     stream.pipe(res);
   } catch (err: any) {
-    console.warn("[Stream Proxy] Setup error. Sending fallback stream redirect...", err);
+    console.warn("[Stream Proxy] ytdl final setup error. Redirecting to deterministic fallback...", err);
     if (!res.headersSent) {
       return res.redirect(fallbackUrl);
     }
@@ -454,6 +490,50 @@ app.get("/api/callback", async (req, res) => {
     res.send(html);
   } catch (err: any) {
     res.redirect("/?error=auth_failed");
+  }
+});
+
+// Generic proxy endpoint for Spotify Web API requests
+app.all("/api/spotify-proxy/*all", async (req, res) => {
+  const token = req.headers.authorization;
+  if (!token) {
+    return res.status(401).json({ error: "Unauthorized: Missing Spotify Access Token in Authorization header" });
+  }
+
+  // Extract path suffix
+  const pathSuffix = (req.params as any).all || "";
+  const queryParams = new URLSearchParams(req.query as any).toString();
+  const spotifyUrl = `https://api.spotify.com/v1/${pathSuffix}${queryParams ? '?' + queryParams : ''}`;
+
+  try {
+    const headers: Record<string, string> = {
+      "Authorization": token,
+      "Content-Type": "application/json"
+    };
+
+    const fetchOptions: RequestInit = {
+      method: req.method,
+      headers
+    };
+
+    if (["POST", "PUT", "PATCH"].includes(req.method) && req.body) {
+      fetchOptions.body = JSON.stringify(req.body);
+    }
+
+    const spotifyResponse = await fetch(spotifyUrl, fetchOptions);
+    const contentType = spotifyResponse.headers.get("content-type");
+
+    res.status(spotifyResponse.status);
+    if (contentType && contentType.includes("application/json")) {
+      const data = await spotifyResponse.json();
+      return res.json(data);
+    } else {
+      const text = await spotifyResponse.text();
+      return res.send(text);
+    }
+  } catch (error: any) {
+    console.error("Spotify API Proxy Error:", error);
+    return res.status(500).json({ error: error.message || "Failed to proxy request to Spotify" });
   }
 });
 

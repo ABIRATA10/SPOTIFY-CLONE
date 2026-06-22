@@ -422,10 +422,22 @@ export default function SpotifyDashboard() {
       .catch(e => console.warn("Could not fetch tracks:", e));
 
     if (accessToken && accessToken !== 'local_bypass') {
-      fetch('https://api.spotify.com/v1/me/playlists?limit=20', {
+      // Fetch via server-side Spotify Proxy (most robust in standard full-stack environment)
+      fetch('/api/spotify-proxy/me/playlists?limit=20', {
         headers: {
           'Authorization': `Bearer ${accessToken}`
         }
+      })
+      .then(async res => {
+        if (!res.ok) {
+          // Fall back to direct Client-Side Spotify Web API request if server-side proxy isn't running (e.g. standalone VS Code frontend demo)
+          return fetch('https://api.spotify.com/v1/me/playlists?limit=20', {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`
+            }
+          });
+        }
+        return res;
       })
       .then(async res => {
          if (res.status === 401) logout();

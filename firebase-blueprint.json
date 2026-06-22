@@ -113,6 +113,36 @@
         }
       },
       "required": ["title", "artist", "likedAt"]
+    },
+    "RecentQuery": {
+      "title": "RecentQuery",
+      "description": "A search term queried by the user.",
+      "type": "object",
+      "properties": {
+        "query": {
+          "type": "string"
+        },
+        "queriedAt": {
+          "type": "string"
+        }
+      },
+      "required": ["query", "queriedAt"]
+    },
+    "SearchHistoryItem": {
+      "title": "SearchHistoryItem",
+      "description": "A song clicked/played from search.",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "artist": { "type": "string" },
+        "album": { "type": "string" },
+        "coverUrl": { "type": "string" },
+        "audioUrl": { "type": "string" },
+        "duration": { "type": "string" },
+        "uri": { "type": "string" },
+        "clickedAt": { "type": "string" }
+      },
+      "required": ["title", "artist", "clickedAt"]
     }
   },
   "firestore": {
@@ -139,6 +169,18 @@
         "$ref": "#/entities/LikedSong"
       },
       "description": "Songs liked by the user."
+    },
+    "/users/{userId}/recentQueries/{queryId}": {
+      "schema": {
+        "$ref": "#/entities/RecentQuery"
+      },
+      "description": "User's recent queries."
+    },
+    "/users/{userId}/searchHistory/{itemId}": {
+      "schema": {
+        "$ref": "#/entities/SearchHistoryItem"
+      },
+      "description": "Tracks clicked from search."
     }
   }
 }

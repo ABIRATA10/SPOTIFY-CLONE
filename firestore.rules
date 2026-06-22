@@ -41,6 +41,30 @@ service cloud.firestore {
         allow delete: if isOwner(userId);
       }
 
+      match /recentQueries/{queryId} {
+        allow list, get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(queryId) &&
+                         incoming().keys().hasAll(['query', 'queriedAt']) &&
+                         incoming().query is string && incoming().query.size() <= 200 &&
+                         incoming().queriedAt == request.time;
+        allow delete: if isOwner(userId);
+      }
+
+      match /searchHistory/{itemId} {
+        allow list, get: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(itemId) &&
+                         incoming().keys().hasAll(['title', 'artist', 'clickedAt']) &&
+                         incoming().title is string && incoming().title.size() <= 500 &&
+                         incoming().artist is string && incoming().artist.size() <= 500 &&
+                         (incoming().get('album', '') is string) && (incoming().get('album', '').size() <= 500) &&
+                         (incoming().get('coverUrl', '') is string) && (incoming().get('coverUrl', '').size() <= 1000) &&
+                         (incoming().get('audioUrl', '') is string) && (incoming().get('audioUrl', '').size() <= 1000) &&
+                         (incoming().get('duration', '') is string) && (incoming().get('duration', '').size() <= 50) &&
+                         (incoming().get('uri', '') is string) && (incoming().get('uri', '').size() <= 200) &&
+                         incoming().clickedAt == request.time;
+        allow delete: if isOwner(userId);
+      }
+
       match /playlists/{playlistId} {
         allow list, get, create, update, delete: if isOwner(userId);
       }

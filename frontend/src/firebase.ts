@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { 
   initializeAuth, 
   browserLocalPersistence, 
@@ -13,18 +13,25 @@ import { getFirestore } from 'firebase/firestore';
 import { getStorage } from 'firebase/storage';
 import firebaseConfig from '../firebase-applet-config.json';
 
-const app = initializeApp(firebaseConfig);
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 
-// Safely initialize Auth with fallback persistence to prevent "INTERNAL ASSERTION FAILED: Pending promise was never set" in iframes
+// Robustly retrieve or initialize the Auth instance
 let authInstance;
 try {
-  authInstance = initializeAuth(app, {
-    persistence: [browserLocalPersistence, browserSessionPersistence, inMemoryPersistence]
-  });
-} catch (error) {
-  // Fall back to getAuth if already initialized (common during Vite hot module replacement)
+  // If already initialized by previous module loads or HMR, retrieve it directly
   authInstance = getAuth(app);
+} catch (error) {
+  // If getAuth fails (not yet initialized), configure with environment-appropriate persistence
+  const isIframe = typeof window !== 'undefined' && window.self !== window.top;
+  try {
+    authInstance = initializeAuth(app, {
+      persistence: isIframe ? [inMemoryPersistence] : [browserLocalPersistence, browserSessionPersistence]
+    });
+  } catch (initError) {
+    // If initialization still fails (e.g. race conditions), do a final getAuth fallback
+    authInstance = getAuth(app);
+  }
 }
 
 export const auth = authInstance;

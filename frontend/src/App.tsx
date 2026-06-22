@@ -11,6 +11,7 @@ import {
   sendPasswordResetEmail,
   sendEmailVerification,
   onAuthStateChanged,
+  signOut,
   User,
 } from "firebase/auth";
 
@@ -58,7 +59,7 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
       if (isLogin) {
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         if (!userCredential.user.emailVerified) {
-            auth.signOut();
+            await signOut(auth);
             setError("Please verify your email before logging in. Check your inbox.");
             return;
         }
@@ -68,7 +69,7 @@ function FirebaseAuthScreen({ onAuthSuccess }: { onAuthSuccess: () => void }) {
         setMessage("Verification email sent! Please check your inbox before logging in.");
         setIsLogin(true);
         // logout so they have to login after verify
-        auth.signOut();
+        await signOut(auth);
         return;
       }
       onAuthSuccess();

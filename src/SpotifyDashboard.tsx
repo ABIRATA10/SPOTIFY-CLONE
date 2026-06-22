@@ -184,7 +184,7 @@ const SPOTIFY_BROWSE_ALL = [
 ];
 
 export default function SpotifyDashboard() {
-  const { accessToken, logout } = useAuth();
+  const { accessToken, logout, login } = useAuth();
   const { enhanceTracks, enhanceTrack } = useAudioDB();
   
   const [playlists, setPlaylists] = useState<any[]>([]);
@@ -254,6 +254,19 @@ export default function SpotifyDashboard() {
 
   const [searchHistory, setSearchHistory] = useState<Track[]>([]);
   const [recentQueries, setRecentQueries] = useState<string[]>([]);
+  const [spotifyUserId, setSpotifyUserId] = useState<string | null>(null);
+  const [spotifyUserDisplayName, setSpotifyUserDisplayName] = useState<string | null>(null);
+  const [spotifyPlaylists, setSpotifyPlaylists] = useState<any[]>([]);
+  const [isCreatingSpotifyPlaylist, setIsCreatingSpotifyPlaylist] = useState(false);
+  const [loadingPlaylistTracks, setLoadingPlaylistTracks] = useState<string | null>(null);
+  const [notification, setNotification] = useState<string | null>(null);
+
+  const showNotification = (msg: string) => {
+     setNotification(msg);
+     setTimeout(() => {
+        setNotification(prev => prev === msg ? null : prev);
+     }, 2000);
+  };
   const [likedTracks, setLikedTracks] = useState<Track[]>([]);
   const [sortBy, setSortBy] = useState<'relevance' | 'title' | 'artist' | 'duration'>('relevance');
   const [librarySortOption, setLibrarySortOption] = useState<'Recent' | 'Alphabetical' | 'Creator'>('Recent');
@@ -345,6 +358,16 @@ export default function SpotifyDashboard() {
      try {
        localStorage.setItem('spotify-clone-recent-queries', JSON.stringify(updated));
      } catch(e) {}
+
+     if (firebaseUser) {
+        const queryId = encodeURIComponent(queryText.trim().toLowerCase()).replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 100);
+        setDoc(doc(db, 'users', firebaseUser.uid, 'recentQueries', queryId), {
+           query: queryText.trim(),
+           queriedAt: serverTimestamp()
+        }).catch(err => {
+           console.warn("Failed to save search query to firestore:", err);
+        });
+     }
   };
 
   const addToSearchHistory = (track: Track) => {
@@ -353,6 +376,22 @@ export default function SpotifyDashboard() {
      try {
        localStorage.setItem('spotify-clone-search-history', JSON.stringify(updated));
      } catch(e) {}
+
+     if (firebaseUser) {
+        const itemId = track.id.replace(/[^a-zA-Z0-9_\-]/g, '_').slice(0, 100) || 'unknown';
+        setDoc(doc(db, 'users', firebaseUser.uid, 'searchHistory', itemId), {
+           title: track.title || 'Unknown Title',
+           artist: track.artist || 'Unknown Artist',
+           album: track.album || '',
+           coverUrl: track.coverUrl || '',
+           audioUrl: track.audioUrl || '',
+           duration: track.duration || '',
+           uri: track.uri || '',
+           clickedAt: serverTimestamp()
+        }).catch(err => {
+           console.warn("Failed to save search history item to firestore:", err);
+        });
+     }
   };
 
   const stateRef = useRef({ currentTrackIndex, isPlaying, queue, repeatMode, isShuffled });
@@ -409,7 +448,45 @@ export default function SpotifyDashboard() {
         handleFirestoreError(e, OperationType.LIST, `users/${firebaseUser.uid}/playlists`);
       }
     };
+
+    const fetchSearchHistoryAndQueries = async () => {
+       try {
+          const rqRef = collection(db, 'users', firebaseUser.uid, 'recentQueries');
+          const rqSn = await getDocs(rqRef);
+          const rqList = rqSn.docs.map(d => d.data().query as string).filter(Boolean);
+          if (rqList.length > 0) {
+             setRecentQueries(rqList.slice(0, 5));
+          }
+       } catch (e) {
+          console.warn("Failed to fetch recent queries from firestore", e);
+       }
+
+       try {
+          const shRef = collection(db, 'users', firebaseUser.uid, 'searchHistory');
+          const shSn = await getDocs(shRef);
+          const shList = shSn.docs.map(d => {
+             const dat = d.data();
+             return {
+                id: d.id,
+                title: dat.title || '',
+                artist: dat.artist || '',
+                album: dat.album || '',
+                coverUrl: dat.coverUrl || '',
+                audioUrl: dat.audioUrl || '',
+                duration: dat.duration || '',
+                uri: dat.uri || ''
+             } as Track;
+          });
+          if (shList.length > 0) {
+             setSearchHistory(shList.slice(0, 12));
+          }
+       } catch (e) {
+          console.warn("Failed to fetch search history from firestore", e);
+       }
+    };
+
     fetchCustomPlaylists();
+    fetchSearchHistoryAndQueries();
   }, [firebaseUser]);
 
   useEffect(() => {
@@ -422,10 +499,22 @@ export default function SpotifyDashboard() {
       .catch(e => console.warn("Could not fetch tracks:", e));
 
     if (accessToken && accessToken !== 'local_bypass') {
-      fetch('https://api.spotify.com/v1/me/playlists?limit=20', {
+      // Fetch via server-side Spotify Proxy (most robust in standard full-stack environment)
+      fetch('/api/spotify-proxy/me/playlists?limit=20', {
         headers: {
           'Authorization': `Bearer ${accessToken}`
         }
+      })
+      .then(async res => {
+        if (!res.ok) {
+          // Fall back to direct Client-Side Spotify Web API request if server-side proxy isn't running (e.g. standalone VS Code frontend demo)
+          return fetch('https://api.spotify.com/v1/me/playlists?limit=20', {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`
+            }
+          });
+        }
+        return res;
       })
       .then(async res => {
          if (res.status === 401) logout();
@@ -441,7 +530,7 @@ export default function SpotifyDashboard() {
          return res.json();
       })
       .then(data => {
-        if (data.items) setPlaylists(data.items);
+        if (data.items) setSpotifyPlaylists(data.items);
       })
       .catch(e => {
         console.warn('Playlist fetch error:', e.message);
@@ -454,6 +543,92 @@ export default function SpotifyDashboard() {
         audioRef.current.src = "";
       }
     };
+  }, [accessToken, logout]);
+
+  // Fetch Spotify Playlist Tracks on demand when opened
+  useEffect(() => {
+    if (activeTab === 'playlist' && viewingArtist && accessToken && accessToken !== 'local_bypass') {
+       const isLocalPlaylist = playlists.some(p => p.id === viewingArtist);
+       if (isLocalPlaylist) return; // Ignore custom local playlists
+
+       const loadedSpotifyPlaylist = spotifyPlaylists.find(p => p.id === viewingArtist);
+       if (loadedSpotifyPlaylist && (!loadedSpotifyPlaylist.tracks?.items || loadedSpotifyPlaylist.tracks.items.length === 0)) {
+          setLoadingPlaylistTracks(viewingArtist);
+          fetch(`/api/spotify-proxy/playlists/${viewingArtist}/tracks?limit=100`, {
+             headers: {
+                'Authorization': `Bearer ${accessToken}`
+             }
+          })
+          .then(res => {
+             if (res.status === 401) logout();
+             return res.json();
+          })
+          .then(data => {
+             if (data && data.items) {
+                const fetchedTracks = data.items.map((item: any) => {
+                   const t = item.track;
+                   if (!t) return null;
+                   const m = Math.floor((t.duration_ms || 0) / 60000);
+                   const s = Math.floor(((t.duration_ms || 0) % 60000) / 1000);
+                   const durationStr = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+                   return {
+                      id: t.id,
+                      title: t.name,
+                      artist: t.artists?.map((a: any) => a.name).join(', ') || 'Unknown Artist',
+                      album: t.album?.name || '',
+                      coverUrl: t.album?.images?.[0]?.url || 'https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=300',
+                      duration: durationStr,
+                      audioUrl: '',
+                      uri: t.uri
+                   };
+                }).filter(Boolean);
+
+                setSpotifyPlaylists(prev => prev.map(p => {
+                   if (p.id === viewingArtist) {
+                      return {
+                         ...p,
+                         tracks: {
+                            total: data.total || fetchedTracks.length,
+                            items: fetchedTracks.map((tr: any) => ({ track: tr }))
+                         }
+                      };
+                   }
+                   return p;
+                }));
+             }
+          })
+          .catch(err => {
+             console.warn("Failed to fetch Spotify playlist tracks on-demand:", err);
+          })
+          .finally(() => {
+             setLoadingPlaylistTracks(null);
+          });
+       }
+    }
+  }, [activeTab, viewingArtist, accessToken, spotifyPlaylists, playlists, logout]);
+
+  // Fetch Spotify User profile details
+  useEffect(() => {
+     if (accessToken && accessToken !== 'local_bypass') {
+        fetch('/api/spotify-proxy/me', {
+           headers: {
+              'Authorization': `Bearer ${accessToken}`
+           }
+        })
+        .then(res => {
+           if (res.status === 401) logout();
+           return res.json();
+        })
+        .then(data => {
+           if (data && data.id) {
+              setSpotifyUserId(data.id);
+              setSpotifyUserDisplayName(data.display_name || data.id);
+           }
+        })
+        .catch(err => {
+           console.warn("Failed to fetch Spotify user profile:", err);
+        });
+     }
   }, [accessToken, logout]);
   
   const openArtistPage = (artistName: string) => {
@@ -1095,9 +1270,20 @@ export default function SpotifyDashboard() {
 
   const toggleRepeat = () => {
     setRepeatMode(prev => {
-        if (prev === 'off') return 'all';
-        if (prev === 'all') return 'one';
-        return 'off';
+        let next: 'off' | 'all' | 'one' = 'off';
+        let label = "No Repeat";
+        if (prev === 'off') {
+           next = 'all';
+           label = "Repeat Playlist";
+        } else if (prev === 'all') {
+           next = 'one';
+           label = "Repeat Track";
+        } else {
+           next = 'off';
+           label = "No Repeat";
+        }
+        showNotification(label);
+        return next;
     });
   };
 
@@ -1127,6 +1313,53 @@ export default function SpotifyDashboard() {
         console.error("error creating playlist", e);
         handleFirestoreError(e, OperationType.CREATE, `users/${firebaseUser.uid}/playlists/${targetId}`);
     }
+  };
+
+  const handleCreateSpotifyPlaylist = async () => {
+     if (!accessToken || accessToken === 'local_bypass') {
+        alert("Please connect to your Spotify account to create a Spotify playlist.");
+        return;
+     }
+     
+     const name = window.prompt("Enter a name for your new Spotify playlist:");
+     if (!name || !name.trim()) return;
+
+     setIsCreatingSpotifyPlaylist(true);
+     
+     try {
+        const uId = spotifyUserId || 'me';
+        const url = `/api/spotify-proxy/users/${uId}/playlists`;
+        const res = await fetch(url, {
+           method: 'POST',
+           headers: {
+              'Authorization': `Bearer ${accessToken}`,
+              'Content-Type': 'application/json'
+           },
+           body: JSON.stringify({
+              name: name.trim(),
+              description: "Created with Spotify Web Player Premium Suite",
+              public: false
+           })
+        });
+
+        if (!res.ok) {
+           const errText = await res.text();
+           throw new Error(errText || `Http error ${res.status}`);
+        }
+
+        const data = await res.json();
+        if (data && data.id) {
+           setSpotifyPlaylists(prev => [data, ...prev]);
+           showNotification(`Created playlist "${name.trim()}"!`);
+        } else {
+           throw new Error("Invalid response from Spotify API");
+        }
+     } catch (e: any) {
+        console.error("Created Spotify Playlist error:", e);
+        alert(`Failed to create Spotify playlist: ${e.message}`);
+     } finally {
+        setIsCreatingSpotifyPlaylist(false);
+     }
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1346,6 +1579,69 @@ export default function SpotifyDashboard() {
                         No playlists found. Create one or follow some to see them here!
                      </div>
                 )}
+
+                {/* Spotify Playlists Section - Dedicated Sidebar Section */}
+                <div className="border-t border-[#282828] my-4 pt-4 shrink-0">
+                   <div className="flex items-center justify-between px-2 mb-3">
+                      <span className="text-xs uppercase tracking-wider text-[#b3b3b3] font-bold">Spotify Playlists</span>
+                      {accessToken && accessToken !== 'local_bypass' && (
+                         <button 
+                            onClick={handleCreateSpotifyPlaylist} 
+                            disabled={isCreatingSpotifyPlaylist}
+                            className="text-xs text-[#1ed760] hover:text-[#1fdf64] hover:underline font-bold transition-all flex items-center gap-1"
+                            title="Create a new playlist in Spotify"
+                         >
+                            {isCreatingSpotifyPlaylist ? (
+                               <span className="animate-spin inline-block w-3 h-3 border-2 border-current border-t-transparent rounded-full" />
+                            ) : (
+                               <>
+                                  <Plus className="w-3.5 h-3.5" /> New
+                               </>
+                            )}
+                         </button>
+                      )}
+                   </div>
+
+                   {accessToken && accessToken !== 'local_bypass' ? (
+                      <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar">
+                         {spotifyPlaylists.map((pl, i) => (
+                            <div 
+                                key={`spotify-sidebar-${pl.id}-${i}`} 
+                                className={`flex items-center gap-3 p-2 hover:bg-[#1a1a1a] rounded-md cursor-pointer transition-all duration-200 hover:scale-[1.01] active:scale-[0.98] group ${activeTab === 'playlist' && viewingArtist === pl.id ? 'bg-[#1a1a1a]' : ''}`}
+                                onClick={() => {
+                                    navigateTo('playlist', pl.id);
+                                }}
+                            >
+                                <img 
+                                    src={pl.images?.[0]?.url || 'https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=100&auto=format&fit=crop'} 
+                                    className="w-10 h-10 rounded object-cover shadow-sm bg-[#282828]" 
+                                    alt={pl.name} 
+                                />
+                                <div className="flex flex-col overflow-hidden flex-1">
+                                    <span className="font-semibold text-white truncate text-sm">{pl.name}</span>
+                                    <span className="text-xs text-[#b3b3b3] truncate">Playlist • {pl.tracks?.total || 0} songs</span>
+                                </div>
+                            </div>
+                         ))}
+
+                         {spotifyPlaylists.length === 0 && (
+                            <div className="text-xs text-[#b3b3b3] px-2 py-2 text-center">
+                               No Spotify playlists found.
+                            </div>
+                         )}
+                      </div>
+                   ) : (
+                      <div className="px-2 py-3 bg-[#121212] rounded-md border border-[#282828] text-center text-xs">
+                         <p className="text-[#b3b3b3] mb-2">Login with Spotify to access your saved playlists.</p>
+                         <button 
+                            onClick={() => login()} 
+                            className="bg-[#1ed760] hover:bg-[#1fdf64] text-black font-bold px-3 py-1.5 rounded-full transition-all text-xs"
+                         >
+                            Connect Spotify
+                         </button>
+                      </div>
+                   )}
+                </div>
              </div>
           </div>
         </div>
@@ -1988,16 +2284,28 @@ export default function SpotifyDashboard() {
              )}
 
              {activeTab === 'playlist' && viewingArtist && (() => {
-                const pl = playlists.find(p => p.id === viewingArtist);
-                if (!pl) return <div className="p-8 text-white">Playlist not found</div>;
-                const plTracks = (pl.tracks.items || []).map(it => it.track);
+                const isLocalPlaylist = playlists.some(p => p.id === viewingArtist);
+                const pl = playlists.find(p => p.id === viewingArtist) || spotifyPlaylists.find(p => p.id === viewingArtist);
+                if (!pl) {
+                   if (loadingPlaylistTracks === viewingArtist) {
+                      return (
+                         <div className="flex flex-col items-center justify-center p-24 gap-4 text-[#eaeaea]">
+                            <Loader2 className="w-10 h-10 animate-spin text-[#1ed760]" />
+                            <span className="font-medium text-sm">Syncing tracks from Spotify...</span>
+                         </div>
+                      );
+                   }
+                   return <div className="p-8 text-white">Playlist not found</div>;
+                }
+                const plTracks = (pl.tracks?.items || []).map(it => it?.track).filter(Boolean);
                 const isCurrentPlaylistPlaying = plTracks.length > 0 && 
                   (originalQueue.length > 0 ? originalQueue : queue).length === plTracks.length &&
                   (originalQueue.length > 0 ? originalQueue : queue).every((t, idx) => t && plTracks[idx] && t.id === plTracks[idx].id);
                 return (
                  <div className="mt-8">
                    <div className="flex items-end gap-6 mb-8 mt-4 group relative">
-                      <EditablePlaylistCover 
+                      {isLocalPlaylist ? (
+                         <EditablePlaylistCover 
                           initialImageUrl={pl.images && pl.images.length > 0 ? pl.images[0].url : undefined}
                           onSaveImage={async (file) => {
                               try {
@@ -2014,10 +2322,20 @@ export default function SpotifyDashboard() {
                           }}
                           prefix={pl.id}
                       />
+                      ) : (
+                         <div className="w-48 h-48 rounded shadow-lg bg-[#282828] relative overflow-hidden shrink-0">
+                            <img 
+                               src={pl.images && pl.images.length > 0 ? pl.images[0].url : 'https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=300'} 
+                               className="w-full h-full object-cover" 
+                               alt={pl.name} 
+                            />
+                         </div>
+                      )}
                       <div className="flex flex-col flex-1">
                          <span className="text-sm font-bold text-white block mb-2">Playlist</span>
-                        <PlaylistTitleInput 
-                           initialName={pl.name}
+                        {isLocalPlaylist ? (
+                           <PlaylistTitleInput 
+                              initialName={pl.name}
                            onSave={async (newName) => {
                                setPlaylists(prev => prev.map(p => p.id === pl.id ? { ...p, name: newName } : p));
                                if (firebaseUser) {
@@ -2031,6 +2349,11 @@ export default function SpotifyDashboard() {
                                }
                            }}
                         />
+                        ) : (
+                           <h1 className="text-2xl sm:text-4xl font-bold text-white mb-2 truncate max-w-full">
+                              {pl.name}
+                           </h1>
+                        )}
                          <div className="flex items-center gap-2 text-[#eaeaea] text-[14px]">
                              <span className="font-bold">{pl.owner?.display_name || 'User'}</span>
                              <span>•</span>
