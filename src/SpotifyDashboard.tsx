@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Play, Pause, SkipForward, SkipBack, Heart, Search, Home, Library, Volume2, Plus, ArrowLeft, ArrowRight, UserCircle2, Repeat, Repeat1, Shuffle, ListMusic, ListPlus, LogOut, Upload, Loader2, PanelRightClose, BadgeCheck, MoreHorizontal, X, VolumeX, ExternalLink, Share2, WifiOff, Trash2 } from 'lucide-react';
+import { Play, Pause, SkipForward, SkipBack, Heart, Search, Home, Library, Volume2, Plus, ArrowLeft, ArrowRight, UserCircle2, Repeat, Repeat1, Shuffle, ListMusic, ListPlus, LogOut, Upload, Loader2, PanelRightClose, BadgeCheck, MoreHorizontal, X, VolumeX, ExternalLink, Share2, WifiOff, Trash2, ChevronUp, ChevronDown, Mic } from 'lucide-react';
 import { motion, AnimatePresence } from "motion/react";
 import YouTube from 'react-youtube';
 import { useAuth } from './SpotifyAuthContext';
@@ -14,6 +14,7 @@ import { PremiumPage } from './components/PremiumPage';
 import { useAudioDB } from './hooks/useAudioDB';
 import { ProfilePhotoEditModal } from './components/ProfilePhotoEditModal';
 import { LyricsDisplay } from './components/LyricsDisplay';
+import { LyricsOverlay } from './components/LyricsOverlay';
 
 enum OperationType {
   CREATE = 'create',
@@ -191,6 +192,8 @@ export default function SpotifyDashboard() {
   const [tracks, setTracks] = useState<Track[]>([]);
   const [queue, setQueue] = useState<Track[]>([]); 
   const [isRightSidebarOpen, setIsRightSidebarOpen] = useState(true);
+  const [isQueueDrawerOpen, setIsQueueDrawerOpen] = useState(false);
+  const [isLyricsOverlayOpen, setIsLyricsOverlayOpen] = useState(false);
   const [followedArtists, setFollowedArtists] = useState<string[]>([]);
   
   const [currentTrackIndex, setCurrentTrackIndex] = useState(0);
@@ -426,16 +429,31 @@ export default function SpotifyDashboard() {
       try {
         const q = query(collection(db, 'users', firebaseUser.uid, 'playlists'));
         const sn = await getDocs(q);
-        const fbPlaylists: any[] = sn.docs.map(d => {
+        const fbPlaylists: any[] = [];
+
+        for (const d of sn.docs) {
           const dat = d.data();
-          return {
-             id: d.id,
-             name: dat.name || 'My Playlist',
-             owner: { display_name: firebaseUser.displayName || 'You' },
-             images: [],
-             tracks: { total: dat.tracks?.length || 0, items: (dat.tracks || []).map((t: any) => ({ track: t })) }
-          };
-        });
+          const pName = dat.name || 'My Playlist';
+          const pDesc = dat.description || '';
+          
+          if (/sex/i.test(pName) || /sex/i.test(pDesc)) {
+            console.warn(`[Sanitizer] Deleting inappropriate playlist ID ${d.id} ("${pName}") from Firestore.`);
+            try {
+              const docRef = doc(db, 'users', firebaseUser.uid, 'playlists', d.id);
+              deleteDoc(docRef).catch(err => {
+                console.error("[Sanitizer] Failed to delete inappropriate playlist doc:", err);
+              });
+            } catch (err) {}
+          } else {
+            fbPlaylists.push({
+               id: d.id,
+               name: pName,
+               owner: { display_name: firebaseUser.displayName || 'You' },
+               images: [],
+               tracks: { total: dat.tracks?.length || 0, items: (dat.tracks || []).map((t: any) => ({ track: t })) }
+            });
+          }
+        }
 
         if (fbPlaylists.length > 0) {
            setPlaylists(prev => {
@@ -493,8 +511,15 @@ export default function SpotifyDashboard() {
     fetch('/api/tracks')
       .then(res => res.json())
       .then(data => {
-         setTracks(data);
-         if (queue.length === 0) setQueue(data);
+         const cleanData = (data || []).filter((track: any) => {
+           if (!track) return false;
+           const titleLower = (track.title || '').toLowerCase();
+           const artistLower = (track.artist || '').toLowerCase();
+           const albumLower = (track.album || '').toLowerCase();
+           return !titleLower.includes('sex') && !artistLower.includes('sex') && !albumLower.includes('sex');
+         });
+         setTracks(cleanData);
+         if (queue.length === 0) setQueue(cleanData);
       })
       .catch(e => console.warn("Could not fetch tracks:", e));
 
@@ -530,7 +555,10 @@ export default function SpotifyDashboard() {
          return res.json();
       })
       .then(data => {
-        if (data.items) setSpotifyPlaylists(data.items);
+        if (data.items) {
+          const cleanItems = data.items.filter((p: any) => p && !/sex/i.test(p.name || '') && !/sex/i.test(p.description || ''));
+          setSpotifyPlaylists(cleanItems);
+        }
       })
       .catch(e => {
         console.warn('Playlist fetch error:', e.message);
@@ -995,6 +1023,43 @@ export default function SpotifyDashboard() {
     setOriginalQueue(prev => {
        if (prev.length === 0) return [track];
        return [...prev, track];
+    });
+  };
+
+  const moveQueueTrackUp = (relativeIndex: number) => {
+    const absIndex = currentTrackIndex + 1 + relativeIndex;
+    if (absIndex <= currentTrackIndex + 1 || absIndex >= queue.length) return;
+    
+    setQueue(prev => {
+      const newQueue = [...prev];
+      const temp = newQueue[absIndex];
+      newQueue[absIndex] = newQueue[absIndex - 1];
+      newQueue[absIndex - 1] = temp;
+      return newQueue;
+    });
+  };
+
+  const moveQueueTrackDown = (relativeIndex: number) => {
+    const absIndex = currentTrackIndex + 1 + relativeIndex;
+    if (absIndex < currentTrackIndex + 1 || absIndex >= queue.length - 1) return;
+    
+    setQueue(prev => {
+      const newQueue = [...prev];
+      const temp = newQueue[absIndex];
+      newQueue[absIndex] = newQueue[absIndex + 1];
+      newQueue[absIndex + 1] = temp;
+      return newQueue;
+    });
+  };
+
+  const removeQueueTrack = (relativeIndex: number) => {
+    const absIndex = currentTrackIndex + 1 + relativeIndex;
+    if (absIndex < currentTrackIndex + 1 || absIndex >= queue.length) return;
+    
+    setQueue(prev => {
+      const newQueue = [...prev];
+      newQueue.splice(absIndex, 1);
+      return newQueue;
     });
   };
   
@@ -3029,8 +3094,15 @@ export default function SpotifyDashboard() {
             }}
           />
           <button
-            onClick={() => navigateTo('queue')}
-            className={`transition-colors p-1 rounded-full ${activeTab === 'queue' ? 'text-[#1db954]' : 'text-[#b3b3b3] hover:text-white'}`}
+            onClick={() => setIsLyricsOverlayOpen(!isLyricsOverlayOpen)}
+            className={`transition-colors p-1 rounded-full ${isLyricsOverlayOpen ? 'text-[#1db954]' : 'text-[#b3b3b3] hover:text-white'}`}
+            title="Sing Along (Lyrics)"
+          >
+             <Mic className="w-5 h-5" />
+          </button>
+          <button
+            onClick={() => setIsQueueDrawerOpen(!isQueueDrawerOpen)}
+            className={`transition-colors p-1 rounded-full ${isQueueDrawerOpen ? 'text-[#1db954]' : 'text-[#b3b3b3] hover:text-white'}`}
             title="Queue"
           >
              <ListMusic className="w-5 h-5" />
@@ -3197,7 +3269,7 @@ export default function SpotifyDashboard() {
                   </button>
                </div>
 
-               <div className="shrink-0 mb-8">
+               <div className="shrink-0 mb-8 cursor-pointer hover:opacity-95 active:scale-[0.99] transition-all" onClick={() => { setIsMobilePlayerOpen(false); setIsLyricsOverlayOpen(true); }} title="Tap to open fullscreen lyrics">
                   <LyricsDisplay 
                       artist={currentTrack.artist} 
                       title={currentTrack.title} 
@@ -3362,6 +3434,205 @@ export default function SpotifyDashboard() {
             </div>
          </div>
       )}
+
+      {/* Play Queue Drawer */}
+      <AnimatePresence>
+         {isQueueDrawerOpen && (
+            <>
+               {/* Semi-transparent backdrop */}
+               <motion.div 
+                  initial={{ opacity: 0 }}
+                  animate={{ opacity: 1 }}
+                  exit={{ opacity: 0 }}
+                  onClick={() => setIsQueueDrawerOpen(false)}
+                  className="fixed inset-0 bg-black/60 backdrop-blur-xs z-[90]"
+               />
+               
+               {/* Right Drawer */}
+               <motion.div 
+                  initial={{ x: '100%' }}
+                  animate={{ x: 0 }}
+                  exit={{ x: '100%' }}
+                  transition={{ type: "spring", damping: 28, stiffness: 250 }}
+                  className="fixed top-0 right-0 h-full w-[460px] max-w-full bg-[#121212] border-l border-[#282828] shadow-2xl z-[100] flex flex-col"
+               >
+                  {/* Header */}
+                  <div className="flex justify-between items-center p-6 border-b border-[#282828]">
+                     <div>
+                        <h2 className="text-xl font-bold text-white flex items-center gap-2">
+                           <ListMusic className="w-5 h-5 text-[#1db954]" />
+                           Play Queue
+                        </h2>
+                        <span className="text-xs text-[#b3b3b3] mt-0.5 block">
+                           {queue.length > 0 && currentTrackIndex < queue.length ? `${queue.length - currentTrackIndex} tracks left` : 'No tracks'}
+                        </span>
+                     </div>
+                     <button 
+                        onClick={() => setIsQueueDrawerOpen(false)}
+                        className="text-[#b3b3b3] hover:text-white bg-[#1a1a1a] hover:bg-[#282828] p-2 rounded-full transition-colors cursor-pointer"
+                        title="Close"
+                     >
+                        <X className="w-5 h-5" />
+                     </button>
+                  </div>
+
+                  {/* Body Content */}
+                  <div className="flex-1 overflow-y-auto p-6 space-y-6">
+                     {/* Now Playing Section */}
+                     <div>
+                        <h3 className="text-xs font-bold uppercase tracking-wider text-[#b3b3b3] mb-3">Now Playing</h3>
+                        {currentTrack ? (
+                           <div className="flex items-center gap-4 p-3 bg-[#181818] rounded-lg border border-[#282828]/50 group">
+                              <div className="w-12 h-12 rounded overflow-hidden shrink-0 shadow-md relative">
+                                 <img src={currentTrack.coverUrl} className="w-full h-full object-cover" alt="" />
+                                 {isPlaying && (
+                                    <div className="absolute inset-0 bg-black/40 flex items-center justify-center">
+                                       <EqualizerIcon />
+                                    </div>
+                                 )}
+                              </div>
+                              <div className="flex-1 min-w-0">
+                                 <h4 className="text-sm font-bold text-[#1db954] truncate">{currentTrack.title}</h4>
+                                 <p className="text-xs text-[#b3b3b3] truncate mt-0.5">{currentTrack.artist}</p>
+                              </div>
+                           </div>
+                        ) : (
+                           <div className="p-4 bg-[#181818] rounded-lg text-center border border-[#282828]/50">
+                              <p className="text-sm text-[#b3b3b3]">Nothing is playing right now.</p>
+                           </div>
+                        )}
+                     </div>
+
+                     {/* Next Up Section */}
+                     <div className="flex flex-col flex-1">
+                        <div className="flex justify-between items-center mb-3">
+                           <h3 className="text-xs font-bold uppercase tracking-wider text-[#b3b3b3]">Next Up</h3>
+                           {queue.length > currentTrackIndex + 1 && (
+                              <button 
+                                 onClick={() => {
+                                    setQueue(prev => prev.slice(0, currentTrackIndex + 1));
+                                 }}
+                                 className="text-xs text-[#b3b3b3] hover:text-[#1db954] transition-colors"
+                              >
+                                 Clear queue
+                              </button>
+                           )}
+                        </div>
+
+                        {queue.length > currentTrackIndex + 1 ? (
+                           <div className="space-y-2 max-h-[calc(100vh-320px)] overflow-y-auto pr-1">
+                              {queue.slice(currentTrackIndex + 1).map((item, idx) => (
+                                 <div 
+                                    key={`${item.id}-${idx}`}
+                                    className="flex items-center gap-3 p-2 rounded-lg bg-[#181818]/40 hover:bg-[#181818] border border-transparent hover:border-[#282828]/50 transition-all group"
+                                 >
+                                    {/* Number / Play Action */}
+                                    <div 
+                                       onClick={() => {
+                                          const newIndex = currentTrackIndex + 1 + idx;
+                                          setCurrentTrackIndex(newIndex);
+                                          playMusic(newIndex);
+                                       }}
+                                       className="w-6 flex justify-center text-[#b3b3b3] group-hover:text-white cursor-pointer hover:scale-110 transition-transform"
+                                       title="Play now"
+                                    >
+                                       <span className="text-xs font-medium group-hover:hidden">{idx + 1}</span>
+                                       <Play className="w-3.5 h-3.5 text-[#1db954] hidden group-hover:block fill-current" />
+                                    </div>
+
+                                    {/* Image */}
+                                    <div className="w-10 h-10 rounded overflow-hidden shrink-0 shadow-sm">
+                                       <img src={item.coverUrl} className="w-full h-full object-cover" alt="" />
+                                    </div>
+
+                                    {/* Track Meta */}
+                                    <div className="flex-1 min-w-0">
+                                       <h4 className="text-sm font-semibold text-white truncate">{item.title}</h4>
+                                       <p className="text-xs text-[#b3b3b3] truncate mt-0.5">{item.artist}</p>
+                                    </div>
+
+                                    {/* Actions */}
+                                    <div className="flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                       {/* Move Up */}
+                                       <button 
+                                          onClick={(e) => {
+                                             e.stopPropagation();
+                                             moveQueueTrackUp(idx);
+                                          }}
+                                          disabled={idx === 0}
+                                          className={`p-1.5 rounded-md hover:bg-[#282828] transition-colors ${idx === 0 ? 'text-[#3e3e3e]/30 cursor-not-allowed' : 'text-[#b3b3b3] hover:text-white'}`}
+                                          title="Move Up"
+                                       >
+                                          <ChevronUp className="w-4 h-4" />
+                                       </button>
+
+                                       {/* Move Down */}
+                                       <button 
+                                          onClick={(e) => {
+                                             e.stopPropagation();
+                                             moveQueueTrackDown(idx);
+                                          }}
+                                          disabled={idx === queue.length - currentTrackIndex - 2}
+                                          className={`p-1.5 rounded-md hover:bg-[#282828] transition-colors ${idx === queue.length - currentTrackIndex - 2 ? 'text-[#3e3e3e]/30 cursor-not-allowed' : 'text-[#b3b3b3] hover:text-white'}`}
+                                          title="Move Down"
+                                        >
+                                          <ChevronDown className="w-4 h-4" />
+                                       </button>
+
+                                       {/* Remove */}
+                                       <button 
+                                          onClick={(e) => {
+                                             e.stopPropagation();
+                                             removeQueueTrack(idx);
+                                          }}
+                                          className="p-1.5 rounded-md hover:bg-red-950/40 text-[#b3b3b3] hover:text-red-500 transition-colors"
+                                          title="Remove from queue"
+                                       >
+                                          <Trash2 className="w-4 h-4" />
+                                       </button>
+                                    </div>
+                                 </div>
+                              ))}
+                           </div>
+                        ) : (
+                           <div className="flex flex-col items-center justify-center p-8 bg-[#181818]/20 rounded-lg border border-dashed border-[#282828] text-center">
+                              <ListMusic className="w-10 h-10 text-[#535353] mb-2" />
+                              <p className="text-sm font-semibold text-white">Queue is empty</p>
+                              <p className="text-xs text-[#b3b3b3] mt-1">Add tracks from Home, Search, or Playlists to keep the music playing.</p>
+                           </div>
+                        )}
+                     </div>
+                  </div>
+               </motion.div>
+            </>
+         )}
+      </AnimatePresence>
+
+      {/* Immersive Sing Along Lyrics overlay */}
+      <LyricsOverlay 
+         isOpen={isLyricsOverlayOpen}
+         onClose={() => setIsLyricsOverlayOpen(false)}
+         currentTrack={currentTrack}
+         progress={progress}
+         duration={duration}
+         isPlaying={isPlaying}
+         isShuffled={isShuffled}
+         repeatMode={repeatMode}
+         onTogglePlayPause={togglePlayPause}
+         onPrev={handlePrev}
+         onNext={() => handleNext(false)}
+         onSeek={(time) => {
+            setProgress(time);
+            if (isYTMode && ytPlayerRef.current) {
+               ytPlayerRef.current.seekTo(time, true);
+            } else if (audioRef.current) {
+               audioRef.current.currentTime = time;
+            }
+         }}
+         onToggleShuffle={toggleShuffle}
+         onToggleRepeat={toggleRepeat}
+         formatTime={formatTime}
+      />
     </div>
   );
 }

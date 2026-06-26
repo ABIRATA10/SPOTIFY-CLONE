@@ -39,17 +39,23 @@ app.get("/api/search", async (req, res) => {
 
       const songTitle = song.name || '';
       const songArtist = song.artist?.name || 'Unknown Artist';
+      const songAlbum = song.album?.name || '';
 
       return {
         id: song.videoId,
         title: songTitle,
         artist: songArtist,
-        album: song.album?.name || '',
+        album: songAlbum,
         duration: durStr,
         audioUrl: `/api/stream/${song.videoId}?title=${encodeURIComponent(songTitle)}&artist=${encodeURIComponent(songArtist)}`,
         coverUrl: song.thumbnails?.[1]?.url || song.thumbnails?.[0]?.url || 'https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=300',
         uri: `yt:track:${song.videoId}`
       };
+    }).filter((track: any) => {
+      const titleLower = (track.title || '').toLowerCase();
+      const artistLower = (track.artist || '').toLowerCase();
+      const albumLower = (track.album || '').toLowerCase();
+      return !titleLower.includes('sex') && !artistLower.includes('sex') && !albumLower.includes('sex');
     });
 
     res.json(results);
@@ -272,16 +278,22 @@ app.get("/api/tracks", async (req, res) => {
       }
       const songTitle = song.name || '';
       const songArtist = song.artist?.name || 'Unknown';
+      const songAlbum = song.album?.name || '';
       return {
         id: song.videoId,
         title: songTitle,
         artist: songArtist,
-        album: song.album?.name || '',
+        album: songAlbum,
         duration: durStr,
         audioUrl: `/api/stream/${song.videoId}?title=${encodeURIComponent(songTitle)}&artist=${encodeURIComponent(songArtist)}`,
         coverUrl: song.thumbnails?.[1]?.url || song.thumbnails?.[0]?.url || 'https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=300',
         uri: `yt:track:${song.videoId}`
       };
+    }).filter((track: any) => {
+      const titleLower = (track.title || '').toLowerCase();
+      const artistLower = (track.artist || '').toLowerCase();
+      const albumLower = (track.album || '').toLowerCase();
+      return !titleLower.includes('sex') && !artistLower.includes('sex') && !albumLower.includes('sex');
     });
     
     if (results.length > 0) {
@@ -315,7 +327,13 @@ app.get("/api/tracks", async (req, res) => {
           coverUrl: song.artworkUrl100?.replace('100x100', '300x300') || 'https://images.unsplash.com/photo-1511192336575-5a79af67a629?q=80&w=300',
           uri: `itunes:track:${song.trackId || i}`
         };
-      }).filter((track: any) => track.audioUrl);
+      }).filter((track: any) => {
+        if (!track.audioUrl) return false;
+        const titleLower = (track.title || '').toLowerCase();
+        const artistLower = (track.artist || '').toLowerCase();
+        const albumLower = (track.album || '').toLowerCase();
+        return !titleLower.includes('sex') && !artistLower.includes('sex') && !albumLower.includes('sex');
+      });
       if (results.length > 0) {
         res.json(results);
         return;
